@@ -7,6 +7,8 @@
 
 import os
 import torch
+import cv2
+import numpy as np
 import torch.distributed as dist
 from torch._six import inf
 
@@ -190,6 +192,56 @@ def ampscaler_get_grad_norm(parameters, norm_type: float = 2.0) -> torch.Tensor:
         total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(),
                                                         norm_type).to(device) for p in parameters]), norm_type)
     return total_norm
+
+
+def distort_image(img: np.ndarray, f: float, D: list[float], shift: tuple[float, float]=(0.0, 0.0), alpha: float=0.0) -> np.ndarray:
+    """Distort an image using a fisheye distortion model
+
+    Args:
+        img (np.ndarray): the image to distort
+        f (float): the focal length of the camera
+        D (list[float]): a list containing the k1, k2, k3 and k4 parameters
+        shift (tuple[float, float]): x and y shift (respectively)
+        alpha (float): the rotation angle (radians)
+
+    Returns:
+        np.ndarray: the distorted image
+    """
+    height, width, _ = img.shape
+    center = (height//2, width//2)
+
+    # Image coordinates
+    map_x, map_y = np.mgrid[0:height, 0:width].astype(np.float32)
+
+    # Center coordinate system
+    if center[0] % 2 == 0:
+        map_x += 0.5
+    if center[1] % 2 == 0:
+        map_y += 0.5
+
+    map_x -= center[0]
+    map_y -= center[1]
+
+    # (shift and) convert to polar coordinates
+    r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
+    theta = (r * (np.pi / 2)) / height
+
+    # Compute fisheye distortion
+    theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
+    rd = f * theta_d
+
+    # Compute distorted map and rotate
+    map_xd = (rd / r) * (map_x + alpha * map_y) + center[0]
+    map_yd = (rd / r) * map_y + center[1]
+
+    # Distort
+    distorted_image = cv2.remap(
+        img, map_yd, map_xd,
+        interpolation=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+    )
+
+    return distorted_image
 
 
 class NativeScalerWithGradNormCount:
