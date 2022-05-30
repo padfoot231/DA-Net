@@ -11,7 +11,7 @@ from utils import distort_image
 IN_PATH = "./tiny-imagenet-200"
 OUT_PATH = "./tiny-imagenet-200-fisheye"
 
-F = 120
+F = 25
 D = [0.5, 0.5, 0.5, 0.5]
 
 
