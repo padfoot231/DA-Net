@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
+import sys
 import pathlib
 import cv2
-from ..utils import distort_image
+
+sys.path.append('..')
+
+from utils import distort_image
 
 IN_PATH = "./tiny-imagenet-200"
 OUT_PATH = "./tiny-imagenet-200-fisheye"
 
-F = 50
+F = 120
 D = [0.5, 0.5, 0.5, 0.5]
 
 
