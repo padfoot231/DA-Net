@@ -247,6 +247,24 @@ def distort_image(img: np.ndarray, alpha: float, D: list[float], shift: tuple[fl
     return distorted_image
 
 
+def distort_batch(x: torch.Tensor, alpha: float, D: list[float], shift: tuple[float, float]=(0.0, 0.0), phi: float=0.0) -> torch.Tensor:
+    """Distort a batch of images (in-place) using a fisheye distortion model (same as distort_image but for a batch of images)
+    Args:
+        x (torch.Tensor): the batch to distort
+        alpha (float): fov angle (radians)
+        D (list[float]): a list containing the k1, k2, k3 and k4 parameters
+        shift (tuple[float, float]): x and y shift (respectively)
+        phi (float): the rotation angle (radians)
+
+    Returns:
+        torch.Tensor: the distorted batch
+    """
+    arr = x.swapaxes(1, 3).numpy()
+    for i in range(arr.shape[0]):
+        arr[i] = distort_image(arr[i], alpha, D, shift, phi)
+    return x
+
+
 class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
 
