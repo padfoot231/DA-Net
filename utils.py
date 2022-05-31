@@ -259,7 +259,7 @@ def distort_batch(x: torch.Tensor, alpha: float, D: list[float], shift: tuple[fl
     Returns:
         torch.Tensor: the distorted batch
     """
-    arr = x.swapaxes(1, 3).numpy()
+    arr = x.moveaxis(1, -1).numpy()
     for i in range(arr.shape[0]):
         arr[i] = distort_image(arr[i], alpha, D, shift, phi)
     return x
