@@ -247,6 +247,23 @@ def distort_image(img: np.ndarray, alpha: float, D: list[float], shift: tuple[fl
     return distorted_image
 
 
+def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, radius_buffer=0, azimuth_buffer=0):
+    sample_points = []
+
+    r_start = dmin + ds - radius_buffer
+    r_end = dmin + radius_buffer
+    alpha_start = phi + azimuth_buffer
+    alpha_end = alpha + phi - azimuth_buffer
+
+    for radius in np.linspace(r_start, r_end, n_radius):
+        for angle in np.linspace(alpha_start, alpha_end, n_azimuth):
+            x = radius * np.cos(angle)
+            y = radius * np.sin(angle)
+            sample_points.append((x, y))
+    
+    return sample_points
+
+
 def distort_batch(x: torch.Tensor, alpha: float, D: list[float], shift: tuple[float, float]=(0.0, 0.0), phi: float=0.0) -> torch.Tensor:
     """Distort a batch of images (in-place) using a fisheye distortion model (same as distort_image but for a batch of images)
     Args:
@@ -292,3 +309,23 @@ class NativeScalerWithGradNormCount:
 
     def load_state_dict(self, state_dict):
         self._scaler.load_state_dict(state_dict)
+
+
+if __name__=='__main__':
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    
+    samples = []
+    for i in range(4):
+        phi = np.pi/2*i
+        for j in range(2):
+            dmin = 16*j
+            samples += get_sample_locations(np.pi/4, phi, dmin, 16, 5, 5)
+
+    samples = list(map(lambda coords: (coords[0]+31.5, coords[1]+31.5), samples))
+
+    img = Image.open('data/tiny-imagenet-200-fisheye/test/images/test_0.JPEG')
+    plt.axis('off')
+    plt.imshow(img)
+    plt.scatter(*zip(*samples))
+    plt.show()
