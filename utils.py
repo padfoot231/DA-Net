@@ -227,15 +227,15 @@ def distort_image(img: np.ndarray, alpha: float, D: list[float], shift: tuple[fl
     # (shift and) convert to polar coordinates
     r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
     theta = (r * (np.pi / 2)) / height
-    f = (height/2) * np.tan(alpha)
+    f = height / (2*np.tan(alpha))
 
-    # Compute fisheye distortion
+    # Compute fisheye distortion with equidistant projection
     theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
-    rd = f * theta_d
+    r_d = f * theta_d
 
     # Compute distorted map and rotate
-    map_xd = (rd / r) * (map_x + phi * map_y) + center[0]
-    map_yd = (rd / r) * map_y + center[1]
+    map_xd = (r_d / r) * (map_x + phi * map_y) + center[0]
+    map_yd = (r_d / r) * map_y + center[1]
 
     # Distort
     distorted_image = cv2.remap(
