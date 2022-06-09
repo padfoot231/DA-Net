@@ -6,6 +6,8 @@
 # --------------------------------------------------------
 
 import os
+import itertools
+from matplotlib.pyplot import title
 import torch
 import cv2
 import numpy as np
@@ -194,32 +196,28 @@ def ampscaler_get_grad_norm(parameters, norm_type: float = 2.0) -> torch.Tensor:
     return total_norm
 
 
-def distort_image(img: np.ndarray, alpha: float, D: list[float], shift: tuple[float, float]=(0.0, 0.0), phi: float=0.0) -> np.ndarray:
+def distort_image(img: np.ndarray, D: list[float], shift: tuple[float, float]=(0.0, 0.0)) -> np.ndarray:
     """Distort an image using a fisheye distortion model
-
-    If the focal length f is provided (and not None), it will be used instead of the value computed using the fov angle alpha
-
     Args:
         img (np.ndarray): the image to distort
         alpha (float): fov angle (radians)
         D (list[float]): a list containing the k1, k2, k3 and k4 parameters
         shift (tuple[float, float]): x and y shift (respectively)
-        phi (float): the rotation angle (radians)
 
     Returns:
         np.ndarray: the distorted image
     """
     height, width, _ = img.shape
-    center = (height//2, width//2)
+    center = [height//2, width//2]
 
     # Image coordinates
     map_x, map_y = np.mgrid[0:height, 0:width].astype(np.float32)
 
     # Center coordinate system
-    if center[0] % 2 == 0:
-        map_x += 0.5
-    if center[1] % 2 == 0:
-        map_y += 0.5
+    if height % 2 == 0:
+        center[0] -= 0.5
+    if width % 2 == 0:
+        center[1] -= 0.5
 
     map_x -= center[0]
     map_y -= center[1]
@@ -227,41 +225,26 @@ def distort_image(img: np.ndarray, alpha: float, D: list[float], shift: tuple[fl
     # (shift and) convert to polar coordinates
     r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
     theta = (r * (np.pi / 2)) / height
-    f = height / (2*np.tan(alpha))
 
     # Compute fisheye distortion with equidistant projection
     theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
+
+    # Scale so that image always fits the original size
+    f = map_y.max() / theta_d[int(center[0]), 0]
     r_d = f * theta_d
 
     # Compute distorted map and rotate
-    map_xd = (r_d / r) * (map_x + phi * map_y) + center[0]
+    map_xd = (r_d / r) * map_x + center[0]
     map_yd = (r_d / r) * map_y + center[1]
 
     # Distort
     distorted_image = cv2.remap(
         img, map_yd, map_xd,
-        interpolation=cv2.INTER_LINEAR,
+        interpolation=cv2.INTER_CUBIC,
         borderMode=cv2.BORDER_CONSTANT,
     )
 
     return distorted_image
-
-
-def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, radius_buffer=0, azimuth_buffer=0):
-    sample_points = []
-
-    r_start = dmin + ds - radius_buffer
-    r_end = dmin + radius_buffer
-    alpha_start = phi + azimuth_buffer
-    alpha_end = alpha + phi - azimuth_buffer
-
-    for radius in np.linspace(r_start, r_end, n_radius):
-        for angle in np.linspace(alpha_start, alpha_end, n_azimuth):
-            x = radius * np.cos(angle)
-            y = radius * np.sin(angle)
-            sample_points.append((x, y))
-    
-    return sample_points
 
 
 def distort_batch(x: torch.Tensor, alpha: float, D: list[float], shift: tuple[float, float]=(0.0, 0.0), phi: float=0.0) -> torch.Tensor:
@@ -280,6 +263,86 @@ def distort_batch(x: torch.Tensor, alpha: float, D: list[float], shift: tuple[fl
     for i in range(arr.shape[0]):
         arr[i] = distort_image(arr[i], alpha, D, shift, phi)
     return x
+
+
+def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, radius_buffer=0, azimuth_buffer=0):
+    """Get the sample locations in a given radius and azimuth range
+    
+    Args:
+        alpha (float): width of the azimuth range (radians)
+        phi (float): phase shift of the azimuth range  (radians)
+        dmin (float): minimum radius of the patch (pixels)
+        ds (float): distance between the inner and outer arcs of the patch (pixels)
+        n_azimuth (int): number of azimuth samples
+        n_radius (int): number of radius samples
+        img_size (tuple): the size of the image (width, height)
+        radius_buffer (int, optional): radius buffer (pixels). Defaults to 0.
+        azimuth_buffer (int, optional): azimuth buffer (radians). Defaults to 0.
+    
+    Returns:
+        list[tuple[int, int]]: list of sample locations
+    """
+
+    # Compute center of the image to shift the samples later
+    center = [img_size[0]//2, img_size[1]//2]
+    if img_size[0] % 2 == 0:
+        center[0] -= 0.5
+    if img_size[1] % 2 == 0:
+        center[1] -= 0.5
+
+    # Sweep start and end
+    r_start = dmin + ds - radius_buffer
+    r_end = dmin + radius_buffer
+    alpha_start = phi + azimuth_buffer
+    alpha_end = alpha + phi - azimuth_buffer
+
+    # Get the sample locations
+    sample_points = []
+    for radius in np.linspace(r_start, r_end, n_radius):
+        for angle in np.linspace(alpha_start, alpha_end, n_azimuth):
+            x = radius * np.cos(angle) + center[0]
+            y = radius * np.sin(angle) + center[1]
+            sample_points.append((x, y))
+    
+    return sample_points
+
+
+def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_buffer=0, azimuth_buffer=0):
+    """Generate the required parameters to sample every patch based on the subdivison
+
+    Args:
+        subdiv (int): the number of subdivisions for which we need to create the samples
+        n_radius (int): number of radius samples
+        n_azimuth (int): number of azimuth samples
+        img_size (tuple): the size of the image
+
+    Returns:
+        list[dict]: the list of parameters to sample every patch
+    """
+    max_radius = img_size[0]//2
+    angle_width = 2*np.pi / 2**(subdiv+1)
+
+    alpha = angle_width
+    ds = max_radius / 2**(subdiv-1)
+    
+    dmin_step = -max_radius / 2**(subdiv-1)
+    dmin_start = max_radius + dmin_step
+    dmin_end = 0
+
+    phi_step = -angle_width
+    phi_start = 0
+    phi_end = -2*np.pi
+    
+    dmin_list = np.arange(dmin_start, dmin_end, dmin_step)
+    phi_list = np.arange(phi_start, phi_end, phi_step)
+
+    dmin_list = np.append(dmin_list, 0)
+
+    return [{
+        "alpha": alpha, "phi": phi, "dmin": dmin, "ds": ds, "n_azimuth": n_azimuth,
+        "n_radius": n_radius, "img_size": img_size, "radius_buffer": radius_buffer,
+        "azimuth_buffer": azimuth_buffer 
+        } for phi, dmin in itertools.product(phi_list, dmin_list)]
 
 
 class NativeScalerWithGradNormCount:
@@ -313,19 +376,27 @@ class NativeScalerWithGradNormCount:
 
 if __name__=='__main__':
     import matplotlib.pyplot as plt
-    from PIL import Image
-    
-    samples = []
-    for i in range(4):
-        phi = np.pi/2*i
-        for j in range(2):
-            dmin = 16*j
-            samples += get_sample_locations(np.pi/4, phi, dmin, 16, 5, 5)
+    _, ax = plt.subplots(figsize=(8, 8))
+    ax.set_title("Sampling locations")
+    colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628']
 
-    samples = list(map(lambda coords: (coords[0]+31.5, coords[1]+31.5), samples))
+    subdiv = 3
+    n_radius = 8
+    n_azimuth = 8
+    img_size = (64, 64)
+    radius_buffer = img_size[0] / (n_radius * (2**(subdiv-1)) * 2 * 2)
+    azimuth_buffer = 2*np.pi / (n_azimuth * (2**(subdiv+1)) * 2)
 
-    img = Image.open('data/tiny-imagenet-200-fisheye/test/images/test_0.JPEG')
-    plt.axis('off')
-    plt.imshow(img)
-    plt.scatter(*zip(*samples))
+    params = get_sample_params_from_subdiv(
+        subdiv=subdiv,
+        img_size=img_size,
+        n_radius=n_radius,
+        n_azimuth=n_azimuth,
+        radius_buffer=radius_buffer,
+        azimuth_buffer=azimuth_buffer
+    )
+
+    for i in range(len(params)):
+        sample_locations = get_sample_locations(**params[i])
+        ax.scatter(*zip(*sample_locations), color=colors[i%len(colors)], s=6)
     plt.show()
