@@ -1,0 +1,24 @@
+{
+    "os": "Linux-5.4.0-77-generic-x86_64-with-debian-bullseye-sid",
+    "python": "3.7.13",
+    "heartbeatAt": "2022-06-01T13:50:54.579283",
+    "startedAt": "2022-06-01T13:50:53.724517",
+    "docker": null,
+    "gpu": "TITAN Xp",
+    "gpu_count": 3,
+    "cpu_count": 12,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "slice.py",
+    "codePath": "Sliceing an image /slice.py",
+    "git": {
+        "remote": "https://github.com/padfoot231/Radial-Transformers.git",
+        "commit": "55078316c828767ff17fc1ef85fbcd2d29100e63"
+    },
+    "email": "akshaya.15je001564@am.ism.ac.in",
+    "root": "/home-local/akath.nobkp/Radial-Transformers",
+    "host": "lv3-32187",
+    "username": "akath",
+    "executable": "/gel/usr/akath/.conda/envs/swin/bin/python"
+}

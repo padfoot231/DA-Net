@@ -14,7 +14,8 @@ def build_model(config):
     model_type = config.MODEL.TYPE
     if model_type == 'swin':
         model = SwinTransformer(img_size=config.DATA.IMG_SIZE,
-                                patch_size=config.MODEL.SWIN.PATCH_SIZE,
+                                radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
+                                azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,
                                 in_chans=config.MODEL.SWIN.IN_CHANS,
                                 num_classes=config.MODEL.NUM_CLASSES,
                                 embed_dim=config.MODEL.SWIN.EMBED_DIM,

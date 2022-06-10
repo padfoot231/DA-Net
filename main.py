@@ -75,7 +75,8 @@ def parse_option():
 
 def main(config):
     dataset_train, dataset_val, data_loader_train, data_loader_val, mixup_fn = build_loader(config)
-
+    print(config.MODEL.SWIN.RADIUS_CUTS)
+    # import pdb;pdb.set_trace()
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
     model = build_model(config)
     logger.info(str(model))
@@ -301,6 +302,8 @@ if __name__ == '__main__':
     torch.cuda.set_device(config.LOCAL_RANK)
     torch.distributed.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
     torch.distributed.barrier()
+
+
 
     seed = config.SEED + dist.get_rank()
     torch.manual_seed(seed)

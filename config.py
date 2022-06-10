@@ -14,6 +14,8 @@ _C = CN()
 # Base config files
 _C.BASE = ['']
 
+
+_C.AMP_ENABLE = True 
 # -----------------------------------------------------------------------------
 # Data settings
 # -----------------------------------------------------------------------------
@@ -25,7 +27,7 @@ _C.DATA.DATA_PATH = ''
 # Dataset name
 _C.DATA.DATASET = 'imagenet'
 # Input image size
-_C.DATA.IMG_SIZE = 224
+_C.DATA.IMG_SIZE = 64 ##224 
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
 # Use zipped dataset instead of folder dataset
@@ -45,14 +47,14 @@ _C.MODEL = CN()
 # Model type
 _C.MODEL.TYPE = 'swin'
 # Model name
-_C.MODEL.NAME = 'swin_tiny_patch4_window7_224'
+_C.MODEL.NAME = 'swin_tiny_patch4_window7_224_distort.yaml'
 # Pretrained weight from checkpoint, could be imagenet22k pretrained weight
 # could be overwritten by command line argument
 _C.MODEL.PRETRAINED = ''
 # Checkpoint to resume, could be overwritten by command line argument
 _C.MODEL.RESUME = ''
 # Number of classes, overwritten in data preparation
-_C.MODEL.NUM_CLASSES = 1000
+_C.MODEL.NUM_CLASSES = 200
 # Dropout rate
 _C.MODEL.DROP_RATE = 0.0
 # Drop path rate
@@ -62,40 +64,28 @@ _C.MODEL.LABEL_SMOOTHING = 0.1
 
 # Swin Transformer parameters
 _C.MODEL.SWIN = CN()
-_C.MODEL.SWIN.PATCH_SIZE = 4
+_C.MODEL.SWIN.PATCH_SIZE = 4 # original swin 4
 _C.MODEL.SWIN.IN_CHANS = 3
 _C.MODEL.SWIN.EMBED_DIM = 96
 _C.MODEL.SWIN.DEPTHS = [2, 2, 6, 2]
 _C.MODEL.SWIN.NUM_HEADS = [3, 6, 12, 24]
-_C.MODEL.SWIN.WINDOW_SIZE = 7
+_C.MODEL.SWIN.WINDOW_SIZE = 4 # 7
 _C.MODEL.SWIN.MLP_RATIO = 4.
 _C.MODEL.SWIN.QKV_BIAS = True
 _C.MODEL.SWIN.QK_SCALE = None
+_C.MODEL.SWIN.RADIUS_CUTS = 16
+_C.MODEL.SWIN.AZIMUTH_CUTS = 64
 _C.MODEL.SWIN.APE = False
 _C.MODEL.SWIN.PATCH_NORM = True
 
-# Swin Transformer V2 parameters
-_C.MODEL.SWINV2 = CN()
-_C.MODEL.SWINV2.PATCH_SIZE = 4
-_C.MODEL.SWINV2.IN_CHANS = 3
-_C.MODEL.SWINV2.EMBED_DIM = 96
-_C.MODEL.SWINV2.DEPTHS = [2, 2, 6, 2]
-_C.MODEL.SWINV2.NUM_HEADS = [3, 6, 12, 24]
-_C.MODEL.SWINV2.WINDOW_SIZE = 7
-_C.MODEL.SWINV2.MLP_RATIO = 4.
-_C.MODEL.SWINV2.QKV_BIAS = True
-_C.MODEL.SWINV2.APE = False
-_C.MODEL.SWINV2.PATCH_NORM = True
-_C.MODEL.SWINV2.PRETRAINED_WINDOW_SIZES = [0, 0, 0, 0]
-
 # Swin MLP parameters
 _C.MODEL.SWIN_MLP = CN()
-_C.MODEL.SWIN_MLP.PATCH_SIZE = 4
+_C.MODEL.SWIN_MLP.PATCH_SIZE = 2 ## 4
 _C.MODEL.SWIN_MLP.IN_CHANS = 3
 _C.MODEL.SWIN_MLP.EMBED_DIM = 96
 _C.MODEL.SWIN_MLP.DEPTHS = [2, 2, 6, 2]
 _C.MODEL.SWIN_MLP.NUM_HEADS = [3, 6, 12, 24]
-_C.MODEL.SWIN_MLP.WINDOW_SIZE = 7
+_C.MODEL.SWIN_MLP.WINDOW_SIZE = 4 ## 7
 _C.MODEL.SWIN_MLP.MLP_RATIO = 4.
 _C.MODEL.SWIN_MLP.APE = False
 _C.MODEL.SWIN_MLP.PATCH_NORM = True
@@ -105,7 +95,7 @@ _C.MODEL.SWIN_MLP.PATCH_NORM = True
 # -----------------------------------------------------------------------------
 _C.TRAIN = CN()
 _C.TRAIN.START_EPOCH = 0
-_C.TRAIN.EPOCHS = 300
+_C.TRAIN.EPOCHS = 600
 _C.TRAIN.WARMUP_EPOCHS = 20
 _C.TRAIN.WEIGHT_DECAY = 0.05
 _C.TRAIN.BASE_LR = 5e-4
@@ -179,9 +169,8 @@ _C.TEST.SEQUENTIAL = False
 # -----------------------------------------------------------------------------
 # Misc
 # -----------------------------------------------------------------------------
-# Enable Pytorch automatic mixed precision (amp).
-_C.AMP_ENABLE = True
-# [Deprecated] Mixed precision opt level of apex, if O0, no apex amp is used ('O0', 'O1', 'O2')
+# Mixed precision opt level, if O0, no amp is used ('O0', 'O1', 'O2')
+# overwritten by command line argument
 _C.AMP_OPT_LEVEL = ''
 # Path to output folder, overwritten by command line argument
 _C.OUTPUT = ''
@@ -222,6 +211,9 @@ def update_config(config, args):
     config.defrost()
     if args.opts:
         config.merge_from_list(args.opts)
+    # lst = ['MODEL.SWIN.RADIUS_CUTS', 16, 'MODEL.SWIN.AZIMUTH_CUTS', 64]
+    # config.merge_from_list(lst)
+
 
     # merge from specific arguments
     if args.batch_size:
@@ -241,11 +233,7 @@ def update_config(config, args):
     if args.use_checkpoint:
         config.TRAIN.USE_CHECKPOINT = True
     if args.amp_opt_level:
-        print("[warning] Apex amp has been deprecated, please use pytorch amp instead!")
-        if args.amp_opt_level == 'O0':
-            config.AMP_ENABLE = False
-    if args.disable_amp:
-        config.AMP_ENABLE = False
+        config.AMP_OPT_LEVEL = args.amp_opt_level
     if args.output:
         config.OUTPUT = args.output
     if args.tag:

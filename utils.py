@@ -139,10 +139,11 @@ def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler,
                   'epoch': epoch,
                   'config': config}
 
-    save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}.pth')
-    logger.info(f"{save_path} saving......")
-    torch.save(save_state, save_path)
-    logger.info(f"{save_path} saved !!!")
+    if epoch%50 == 0:
+        save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}.pth')
+        logger.info(f"{save_path} saving......")
+        torch.save(save_state, save_path)
+        logger.info(f"{save_path} saved !!!")
 
 
 def get_grad_norm(parameters, norm_type=2):
@@ -194,54 +195,54 @@ def ampscaler_get_grad_norm(parameters, norm_type: float = 2.0) -> torch.Tensor:
     return total_norm
 
 
-def distort_image(img: np.ndarray, f: float, D: list[float], shift: tuple[float, float]=(0.0, 0.0), alpha: float=0.0) -> np.ndarray:
-    """Distort an image using a fisheye distortion model
+# def distort_image(img: np.ndarray, f: float, D: list[float], shift: tuple[float, float]=(0.0, 0.0), alpha: float=0.0) -> np.ndarray:
+#     """Distort an image using a fisheye distortion model
 
-    Args:
-        img (np.ndarray): the image to distort
-        f (float): the focal length of the camera
-        D (list[float]): a list containing the k1, k2, k3 and k4 parameters
-        shift (tuple[float, float]): x and y shift (respectively)
-        alpha (float): the rotation angle (radians)
+#     Args:
+#         img (np.ndarray): the image to distort
+#         f (float): the focal length of the camera
+#         D (list[float]): a list containing the k1, k2, k3 and k4 parameters
+#         shift (tuple[float, float]): x and y shift (respectively)
+#         alpha (float): the rotation angle (radians)
 
-    Returns:
-        np.ndarray: the distorted image
-    """
-    height, width, _ = img.shape
-    center = (height//2, width//2)
+#     Returns:
+#         np.ndarray: the distorted image
+#     """
+#     height, width, _ = img.shape
+#     center = (height//2, width//2)
 
-    # Image coordinates
-    map_x, map_y = np.mgrid[0:height, 0:width].astype(np.float32)
+#     # Image coordinates
+#     map_x, map_y = np.mgrid[0:height, 0:width].astype(np.float32)
 
-    # Center coordinate system
-    if center[0] % 2 == 0:
-        map_x += 0.5
-    if center[1] % 2 == 0:
-        map_y += 0.5
+#     # Center coordinate system
+#     if center[0] % 2 == 0:
+#         map_x += 0.5
+#     if center[1] % 2 == 0:
+#         map_y += 0.5
 
-    map_x -= center[0]
-    map_y -= center[1]
+#     map_x -= center[0]
+#     map_y -= center[1]
 
-    # (shift and) convert to polar coordinates
-    r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
-    theta = (r * (np.pi / 2)) / height
+#     # (shift and) convert to polar coordinates
+#     r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
+#     theta = (r * (np.pi / 2)) / height
 
-    # Compute fisheye distortion
-    theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
-    rd = f * theta_d
+#     # Compute fisheye distortion
+#     theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
+#     rd = f * theta_d
 
-    # Compute distorted map and rotate
-    map_xd = (rd / r) * (map_x + alpha * map_y) + center[0]
-    map_yd = (rd / r) * map_y + center[1]
+#     # Compute distorted map and rotate
+#     map_xd = (rd / r) * (map_x + alpha * map_y) + center[0]
+#     map_yd = (rd / r) * map_y + center[1]
 
-    # Distort
-    distorted_image = cv2.remap(
-        img, map_yd, map_xd,
-        interpolation=cv2.INTER_LINEAR,
-        borderMode=cv2.BORDER_CONSTANT,
-    )
+#     # Distort
+#     distorted_image = cv2.remap(
+#         img, map_yd, map_xd,
+#         interpolation=cv2.INTER_LINEAR,
+#         borderMode=cv2.BORDER_CONSTANT,
+#     )
 
-    return distorted_image
+#     return distorted_image
 
 
 class NativeScalerWithGradNormCount:
