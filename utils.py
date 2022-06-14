@@ -280,11 +280,11 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, ra
         azimuth_buffer (int, optional): azimuth buffer (radians). Defaults to 0.
     
     Returns:
-        list[tuple[int, int]]: list of sample locations
+        tuple[ndarray, ndarray]: lists of x and y coordinates of the sample locations
     """
 
     # Compute center of the image to shift the samples later
-    center = [img_size[0]//2, img_size[1]//2]
+    center = [img_size[0]/2, img_size[1]/2]
     if img_size[0] % 2 == 0:
         center[0] -= 0.5
     if img_size[1] % 2 == 0:
@@ -297,14 +297,14 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, ra
     alpha_end = alpha + phi - azimuth_buffer
 
     # Get the sample locations
-    sample_points = []
-    for radius in np.linspace(r_start, r_end, n_radius):
-        for angle in np.linspace(alpha_start, alpha_end, n_azimuth):
-            x = radius * np.cos(angle) + center[0]
-            y = radius * np.sin(angle) + center[1]
-            sample_points.append((x, y))
+    radius = np.linspace(r_start, r_end, n_radius)
+    azimuth = np.linspace(alpha_start, alpha_end, n_azimuth)
+    azimuth_mesh, radius_mesh = np.meshgrid(azimuth, radius)
+
+    x = radius_mesh * np.cos(azimuth_mesh) + center[0]
+    y = radius_mesh * np.sin(azimuth_mesh) + center[1]
     
-    return sample_points
+    return x.reshape(-1), y.reshape(-1)
 
 
 def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_buffer=0, azimuth_buffer=0):
@@ -319,30 +319,50 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_
     Returns:
         list[dict]: the list of parameters to sample every patch
     """
-    max_radius = img_size[0]//2
-    angle_width = 2*np.pi / 2**(subdiv+1)
-
-    alpha = angle_width
+    max_radius = min(img_size)/2
+    alpha = 2*np.pi / 2**(subdiv+1)
     ds = max_radius / 2**(subdiv-1)
     
-    dmin_step = -max_radius / 2**(subdiv-1)
-    dmin_start = max_radius + dmin_step
-    dmin_end = 0
+    dmin_start = 0
+    dmin_end = max_radius
+    dmin_step = ds
 
-    phi_step = -angle_width
+    # walk backwards through the dmin list
+    dmin_list = np.flip(np.arange(dmin_start, dmin_end, dmin_step))
+
     phi_start = 0
-    phi_end = -2*np.pi
-    
-    dmin_list = np.arange(dmin_start, dmin_end, dmin_step)
+    phi_end = 2*np.pi
+    phi_step = alpha
     phi_list = np.arange(phi_start, phi_end, phi_step)
 
-    dmin_list = np.append(dmin_list, 0)
+    # Generate parameters for each patch
+    params = []
+    for phi, dmin in itertools.product(phi_list, dmin_list):
+        params.append({
+            'alpha': alpha, "phi": phi, "dmin": dmin, "ds": ds, "n_azimuth": n_azimuth, "n_radius": n_radius,
+            "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer
+        })
 
-    return [{
-        "alpha": alpha, "phi": phi, "dmin": dmin, "ds": ds, "n_azimuth": n_azimuth,
-        "n_radius": n_radius, "img_size": img_size, "radius_buffer": radius_buffer,
-        "azimuth_buffer": azimuth_buffer 
-        } for phi, dmin in itertools.product(phi_list, dmin_list)]
+    return params
+
+
+def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
+    """Get the optimal radius and azimuth buffers for a given subdivision
+
+    Args:
+        subdiv (int): the number of subdivisions for which we need to create the samples
+        n_radius (int): number of radius samples
+        n_azimuth (int): number of azimuth samples
+        img_size (tuple): the size of the image
+
+    Returns:
+        tuple[int, int]: the optimal radius and azimuth buffers
+    """
+
+    # Get the optimal buffers
+    radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
+    azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
+    return radius_buffer, azimuth_buffer
 
 
 class NativeScalerWithGradNormCount:
@@ -384,8 +404,7 @@ if __name__=='__main__':
     n_radius = 8
     n_azimuth = 8
     img_size = (64, 64)
-    radius_buffer = img_size[0] / (n_radius * (2**(subdiv-1)) * 2 * 2)
-    azimuth_buffer = 2*np.pi / (n_azimuth * (2**(subdiv+1)) * 2)
+    radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
 
     params = get_sample_params_from_subdiv(
         subdiv=subdiv,
@@ -398,5 +417,5 @@ if __name__=='__main__':
 
     for i in range(len(params)):
         sample_locations = get_sample_locations(**params[i])
-        ax.scatter(*zip(*sample_locations), color=colors[i%len(colors)], s=6)
+        ax.scatter(*sample_locations, color=colors[i%len(colors)], s=6)
     plt.show()
