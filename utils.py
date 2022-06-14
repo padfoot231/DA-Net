@@ -311,7 +311,8 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_
     """Generate the required parameters to sample every patch based on the subdivison
 
     Args:
-        subdiv (int): the number of subdivisions for which we need to create the samples
+        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
+                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
         n_radius (int): number of radius samples
         n_azimuth (int): number of azimuth samples
         img_size (tuple): the size of the image
@@ -320,8 +321,15 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_
         list[dict]: the list of parameters to sample every patch
     """
     max_radius = min(img_size)/2
-    alpha = 2*np.pi / 2**(subdiv+1)
-    ds = max_radius / 2**(subdiv-1)
+
+    if isinstance(subdiv, int):
+        ds = max_radius / 2**(subdiv-1)
+        alpha = 2*np.pi / 2**(subdiv+1)
+    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
+        ds = max_radius / subdiv[0]
+        alpha = 2*np.pi / subdiv[1]
+    else:
+        raise ValueError("Invalid subdivision")
     
     dmin_start = 0
     dmin_end = max_radius
@@ -350,7 +358,8 @@ def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
     """Get the optimal radius and azimuth buffers for a given subdivision
 
     Args:
-        subdiv (int): the number of subdivisions for which we need to create the samples
+        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
+                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
         n_radius (int): number of radius samples
         n_azimuth (int): number of azimuth samples
         img_size (tuple): the size of the image
@@ -360,8 +369,15 @@ def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
     """
 
     # Get the optimal buffers
-    radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
-    azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
+    if isinstance(subdiv, int):
+        radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
+        azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
+    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
+        radius_buffer = img_size[0] / (radius_subdiv*n_radius*2*2)
+        azimuth_buffer = 2*np.pi / (azimuth_subdiv*n_azimuth*2)
+    else:
+        raise ValueError("Invalid subdivision")
+   
     return radius_buffer, azimuth_buffer
 
 
@@ -400,6 +416,10 @@ if __name__=='__main__':
     ax.set_title("Sampling locations")
     colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628']
 
+    # subdiv = 3
+    radius_subdiv = 16
+    azimuth_subdiv = 64
+    subdiv = (radius_subdiv, azimuth_subdiv)
     subdiv = 3
     n_radius = 8
     n_azimuth = 8
