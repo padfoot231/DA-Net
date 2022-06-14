@@ -12,6 +12,7 @@ from .swin_mlp import SwinMLP
 
 def build_model(config):
     model_type = config.MODEL.TYPE
+
     if model_type == 'swin':
         model = SwinTransformer(img_size=config.DATA.IMG_SIZE,
                                 radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 

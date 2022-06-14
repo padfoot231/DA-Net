@@ -75,9 +75,10 @@ def parse_option():
 
 def main(config):
     dataset_train, dataset_val, data_loader_train, data_loader_val, mixup_fn = build_loader(config)
-    print(config.MODEL.SWIN.RADIUS_CUTS)
+    # print(config.MODEL.SWIN.RADIUS_CUTS)
     # import pdb;pdb.set_trace()
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
+
     model = build_model(config)
     logger.info(str(model))
 
@@ -305,6 +306,7 @@ if __name__ == '__main__':
 
 
 
+
     seed = config.SEED + dist.get_rank()
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -321,6 +323,7 @@ if __name__ == '__main__':
         linear_scaled_lr = linear_scaled_lr * config.TRAIN.ACCUMULATION_STEPS
         linear_scaled_warmup_lr = linear_scaled_warmup_lr * config.TRAIN.ACCUMULATION_STEPS
         linear_scaled_min_lr = linear_scaled_min_lr * config.TRAIN.ACCUMULATION_STEPS
+    
     config.defrost()
     config.TRAIN.BASE_LR = linear_scaled_lr
     config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr

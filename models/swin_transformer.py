@@ -10,6 +10,7 @@ import torch.nn as nn
 import numpy as np
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from utils import get_sample_params_from_subdiv, get_sample_locations, get_optimal_buffers
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -428,12 +429,12 @@ class PatchEmbed(nn.Module):
         patches_resolution = [2*radius_cuts, azimuth_cuts//2]  ### azimuth is always cut in even partition 
         self.azimuth_cuts = azimuth_cuts
         self.radius_cuts = radius_cuts
+        self.subdiv = (self.radius_cuts, self.azimuth_cuts)
         self.img_size = img_size
         self.radius = radius
         self.azimuth = azimuth
         self.measurement = 1.0
         self.max_azimuth = np.pi*2
-        # self.radius = radius
         patch_size = [self.measurement/radius_cuts, self.max_azimuth/azimuth_cuts]
         # self.azimuth = 2*np.pi  comes from the cartesian script
 
@@ -443,46 +444,69 @@ class PatchEmbed(nn.Module):
         self.num_patches = radius_cuts*azimuth_cuts
         self.in_chans = in_chans
         self.embed_dim = embed_dim
+
+        
+        # subdiv = 3
+        self.n_radius = 8
+        self.n_azimuth = 8
+
+        radius_buffer, azimuth_buffer = get_optimal_buffers(self.subdiv, self.n_radius, self.n_azimuth, self.img_size)
+
+        params = get_sample_params_from_subdiv(
+            subdiv=self.subdiv,
+            img_size=img_size,
+            n_radius=self.n_radius,
+            n_azimuth=self.n_azimuth,
+            radius_buffer=radius_buffer,
+            azimuth_buffer=azimuth_buffer
+        )
+        x_ = []
+        y_ = []
+        for i in range(len(params)):
+            sample_locations = get_sample_locations(**params[i])
+            x_.append(sample_locations[0])
+            y_.append(sample_locations[1])
+        
+        self.x_ = x_
+        self.y_ = y_
         
         ############################ 
         ## Use padding for every patch ### define everything in self function 
-        masks = []
-        mlp = []
-        dim_out_in = []
-        for rad in range(len(range(radius_cuts))):
-            num_features = []
-            for the in range(len(range(azimuth_cuts))):
-                if the < (azimuth_cuts//2):
-                    mask = (radius < 1) &(radius < (self.measurement - patch_size[0]*rad)) & (radius >  self.measurement - patch_size[0]*(rad+1)) & (azimuth< (np.pi - patch_size[1]*the)) & (azimuth > (np.pi - patch_size[1]*(the+1)))
-                    mask = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (img_size), mode="area")
-                    mask = mask*1.0
-                    mask = mask.cuda()
-                    count = torch.count_nonzero(mask)
-                    num_features.append(count)
-                    masks.append(mask)
-                else:
-                    mask = (radius < 1)  &(radius < (self.measurement - patch_size[0]*rad)) & (radius >  self.measurement - patch_size[0]*(rad+1)) &  (azimuth < (0 - patch_size[1]*(the - azimuth_cuts//2))) & (azimuth > (0 - patch_size[1]*(the + 1 - azimuth_cuts//2)))
-                    mask = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (img_size), mode="area")
-                    mask = mask*1.0
-                    mask = mask.cuda()
-                    count = torch.count_nonzero(mask)
-                    num_features.append(count)
-                    masks.append(mask) 
-            dim_in = max(num_features)
-            lin = nn.Linear(dim_in*in_chans, embed_dim)
-            self.lin = lin.cuda()
-            mlp.append(self.lin)
-            dim_out_in.append(dim_in*in_chans) 
-                                              
-                                         
-        ############################
-        self.masks = masks
+        # masks = []
+        # mlp = []
+        # dim_out_in = []
+        # for rad in range(len(range(radius_cuts))):
+        #     num_features = []
+        #     for the in range(len(range(azimuth_cuts))):
+        #         if the < (azimuth_cuts//2):
+        #             mask = (radius < 1) &(radius < (self.measurement - patch_size[0]*rad)) & (radius >  self.measurement - patch_size[0]*(rad+1)) & (azimuth< (np.pi - patch_size[1]*the)) & (azimuth > (np.pi - patch_size[1]*(the+1)))
+        #             mask = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (img_size), mode="area")
+        #             mask = mask*1.0
+        #             mask = mask.cuda()
+        #             count = torch.count_nonzero(mask)
+        #             num_features.append(count)
+        #             masks.append(mask)
+        #         else:
+        #             mask = (radius < 1)  &(radius < (self.measurement - patch_size[0]*rad)) & (radius >  self.measurement - patch_size[0]*(rad+1)) &  (azimuth < (0 - patch_size[1]*(the - azimuth_cuts//2))) & (azimuth > (0 - patch_size[1]*(the + 1 - azimuth_cuts//2)))
+        #             mask = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (img_size), mode="area")
+        #             mask = mask*1.0
+        #             mask = mask.cuda()
+        #             count = torch.count_nonzero(mask)
+        #             num_features.append(count)
+        #             masks.append(mask) 
+        #     dim_in = max(num_features)
+        #     lin = nn.Linear(dim_in*in_chans, embed_dim)
+        #     self.lin = lin.cuda()
+        #     mlp.append(self.lin)
+        #     dim_out_in.append(dim_in*in_chans)
 
-        
-        self.mlp = mlp
-        self.dim_out_in = dim_out_in
-        # self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-        # define number of MLPs to emebd each patch 
+        ############################
+        # self.masks = masks
+        # self.mlp = mlp
+        # self.dim_out_in = dim_out_in
+
+        ############### padding method multiple mlps ################# 
+        self.mlp = nn.Linear(self.n_radius*self.n_azimuth*in_chans, embed_dim)
 
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
@@ -497,54 +521,62 @@ class PatchEmbed(nn.Module):
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
 
         ############################ projection layer ################
-        x_ = torch.empty(B, self.embed_dim, self.radius_cuts*2, self.azimuth_cuts//2).cuda(non_blocking=True)
+        x_out = torch.empty(B, self.embed_dim, self.radius_cuts*2, self.azimuth_cuts//2).cuda(non_blocking=True)
 
-        out = torch.empty(1, self.embed_dim)
-        out = out.cuda(non_blocking=True)
-        m = 0
-        for i in range(self.radius_cuts):
-            for j in range(self.azimuth_cuts):
-                # print(len(self.masks))
-                image = x*self.masks[m]
-                # print(image.shape)
-                image = torch.flatten(image, start_dim = 1)
-                idx = torch.nonzero(image)
-                # import pdb;pdb.set_trace()
-                image = image[idx.transpose(0,1)[0], idx.transpose(0,1)[1]]
-        #         import pdb;pdb.set_trace()
-                if image.shape[0]%B ==0:
-                    image = image.reshape(B, image.shape[0]//B)
-                else:
-                    pad = int(128 - image.shape[0]%128)
-                    image = nn.functional.pad(image, (pad//2, pad - pad//2))
-                    image = image.reshape(B, image.shape[0]//B)
-                # import pdb;pdb.set_trace()
-                if image.shape[1] < self.dim_out_in[i]:
-                    pad = int(self.dim_out_in[i] - image.shape[1])
-                    image  = nn.functional.pad(image, (pad//2, pad - pad//2))
-                    image = image.cuda(non_blocking=True)
-                else:
-                    image = image.cuda(non_blocking=True)
+        for i in range(self.azimuth_cuts):
+            # print(i, i*radius_subdiv)
+            tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
+            out = self.mlp(tensor)
+            out = out.contiguous().view(B, self.radius_cuts, -1).transpose(1,2)
+            if i < self.azimuth_cuts//2:
+                x_out[:, :, 0:self.radius_cuts, self.azimuth_cuts//2-1-i] = out
+            else:
+                x_out[:,:, self.radius_cuts:2*self.radius_cuts, i-self.azimuth_cuts//2] = out
+            
+    
+
+###########################################################################################################
+        # for j in range(self.azimuth_cuts):
+        #     for i in range(self.radius_cuts)
+        # for i in range(self.radius_cuts):
+        #     for j in range(self.azimuth_cuts):
+        #         image = x*self.masks[m]
+        #         image = torch.flatten(image, start_dim = 1)
+        #         idx = torch.nonzero(image)
+        #         image = image[idx.transpose(0,1)[0], idx.transpose(0,1)[1]]
+        #         if image.shape[0]%B ==0:
+        #             image = image.reshape(B, image.shape[0]//B)
+        #         else:
+        #             pad = int(128 - image.shape[0]%128)
+        #             image = nn.functional.pad(image, (pad//2, pad - pad//2))
+        #             image = image.reshape(B, image.shape[0]//B)
+        #         if image.shape[1] < self.dim_out_in[i]:
+        #             pad = int(self.dim_out_in[i] - image.shape[1])
+        #             image  = nn.functional.pad(image, (pad//2, pad - pad//2))
+        #             image = image.cuda(non_blocking=True)
+        #         else:
+        #             image = image.cuda(non_blocking=True)
                 
-                out = self.mlp[i](image)
+        #         out = self.mlp[i](image)
                 
-                # import pdb;pdb.set_trace()
-                if j < self.azimuth_cuts//2:
-                    # print("up")
-        #                 import pdb;pdb.set_trace()
-                    x_[:, :, i, j] = out
-                    # print(i, j)
-                else:
-                    # print("down")
-        #                     import pdb;pdb.set_trace()
-                    x_[:, : , self.radius_cuts*2 - i - 1, self.azimuth_cuts//2 - (j - self.azimuth_cuts//2 ) -1] = out
-                    # print( self.radius_cuts*2 - i - 1, self.azimuth_cuts//2 - (j - self.azimuth_cuts//2 ) -1)
-                m += 1
+        #         # import pdb;pdb.set_trace()
+        #         if j < self.azimuth_cuts//2:
+        #             # print("up")
+        # #                 import pdb;pdb.set_trace()
+        #             x_[:, :, i, j] = out
+        #             # print(i, j)
+        #         else:
+        #             # print("down")
+        # #                     import pdb;pdb.set_trace()
+        #             x_[:, : , self.radius_cuts*2 - i - 1, self.azimuth_cuts//2 - (j - self.azimuth_cuts//2 ) -1] = out
+        #             # print( self.radius_cuts*2 - i - 1, self.azimuth_cuts//2 - (j - self.azimuth_cuts//2 ) -1)
+        #         m += 1
         ###################################### end of projection layer ################
         # print(x_.shape, x_.device)
         # import pdb;pdb.set_trace()
-        x = x_.flatten(2).transpose(1, 2)  # B Ph*Pw C
-
+        x = x_out.flatten(2).transpose(1, 2)  # B Ph*Pw C
+        # print(x_out.shape)
+        # import pdb;pdb.set_trace()
         if self.norm is not None:
             x = self.norm(x)
         return x
@@ -583,7 +615,7 @@ class SwinTransformer(nn.Module):
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
     """
 
-    def __init__(self, img_size=224, radius_cuts=16, azimuth_cuts = 64,   in_chans=3, num_classes=1000,
+    def __init__(self, img_size=224, radius_cuts=16, azimuth_cuts = 64, in_chans=3, num_classes=1000,
                  embed_dim=96, depths=[2, 2, 6, 2], num_heads=[3, 6, 12, 24],
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
@@ -598,6 +630,9 @@ class SwinTransformer(nn.Module):
         self.patch_norm = patch_norm
         self.num_features = int(embed_dim * 2 ** (self.num_layers - 1))
         self.mlp_ratio = mlp_ratio
+        # self.masks = masks 
+        # 
+        # self.dim_out_in = dim_out_in
 
         res=1024
 
@@ -612,7 +647,7 @@ class SwinTransformer(nn.Module):
         print(radius_cuts)
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
-            img_size=img_size, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts, radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
+            img_size=img_size, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
         patches_resolution = self.patch_embed.patches_resolution 

@@ -6,11 +6,14 @@
 # --------------------------------------------------------
 
 import os
+import itertools
+from matplotlib.pyplot import title
 import torch
 import cv2
 import numpy as np
 import torch.distributed as dist
 from torch._six import inf
+
 
 
 def load_checkpoint(config, model, optimizer, lr_scheduler, loss_scaler, logger):
@@ -244,6 +247,116 @@ def ampscaler_get_grad_norm(parameters, norm_type: float = 2.0) -> torch.Tensor:
 
 #     return distorted_image
 
+def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, radius_buffer=0, azimuth_buffer=0):
+    """Get the sample locations in a given radius and azimuth range
+    
+    Args:
+        alpha (float): width of the azimuth range (radians)
+        phi (float): phase shift of the azimuth range  (radians)
+        dmin (float): minimum radius of the patch (pixels)
+        ds (float): distance between the inner and outer arcs of the patch (pixels)
+        n_azimuth (int): number of azimuth samples
+        n_radius (int): number of radius samples
+        img_size (tuple): the size of the image (width, height)
+        radius_buffer (int, optional): radius buffer (pixels). Defaults to 0.
+        azimuth_buffer (int, optional): azimuth buffer (radians). Defaults to 0.
+    
+    Returns:
+        tuple[ndarray, ndarray]: lists of x and y coordinates of the sample locations
+    """
+
+    # Compute center of the image to shift the samples later
+    center = [img_size[0]/2, img_size[1]/2]
+    if img_size[0] % 2 == 0:
+        center[0] -= 0.5
+    if img_size[1] % 2 == 0:
+        center[1] -= 0.5
+
+    # Sweep start and end
+    r_start = dmin + ds - radius_buffer
+    r_end = dmin + radius_buffer
+    alpha_start = phi + azimuth_buffer
+    alpha_end = alpha + phi - azimuth_buffer
+
+    # Get the sample locations
+    radius = np.linspace(r_start, r_end, n_radius)
+    azimuth = np.linspace(alpha_start, alpha_end, n_azimuth)
+    azimuth_mesh, radius_mesh = np.meshgrid(azimuth, radius)
+
+    x = radius_mesh * np.cos(azimuth_mesh) + center[0]
+    y = radius_mesh * np.sin(azimuth_mesh) + center[1]
+    
+    return x.reshape(-1), y.reshape(-1)
+
+
+def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_buffer=0, azimuth_buffer=0):
+    """Generate the required parameters to sample every patch based on the subdivison
+    Args:
+        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
+                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
+        n_radius (int): number of radius samples
+        n_azimuth (int): number of azimuth samples
+        img_size (tuple): the size of the image
+    Returns:
+        list[dict]: the list of parameters to sample every patch
+    """
+    max_radius = min(img_size)/2
+
+    if isinstance(subdiv, int):
+        ds = max_radius / 2**(subdiv-1)
+        alpha = 2*np.pi / 2**(subdiv+1)
+    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
+        ds = max_radius / subdiv[0]
+        alpha = 2*np.pi / subdiv[1]
+    else:
+        raise ValueError("Invalid subdivision")
+    
+    dmin_start = 0
+    dmin_end = max_radius
+    dmin_step = ds
+
+    # walk backwards through the dmin list
+    dmin_list = np.flip(np.arange(dmin_start, dmin_end, dmin_step))
+
+    phi_start = 0
+    phi_end = 2*np.pi
+    phi_step = alpha
+    phi_list = np.arange(phi_start, phi_end, phi_step)
+
+    # Generate parameters for each patch
+    params = []
+    for phi, dmin in itertools.product(phi_list, dmin_list):
+        params.append({
+            'alpha': alpha, "phi": phi, "dmin": dmin, "ds": ds, "n_azimuth": n_azimuth, "n_radius": n_radius,
+            "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer
+        })
+
+    return params
+
+
+def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
+    """Get the optimal radius and azimuth buffers for a given subdivision
+    Args:
+        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
+                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
+        n_radius (int): number of radius samples
+        n_azimuth (int): number of azimuth samples
+        img_size (tuple): the size of the image
+    Returns:
+        tuple[int, int]: the optimal radius and azimuth buffers
+    """
+
+    # Get the optimal buffers
+    if isinstance(subdiv, int):
+        radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
+        azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
+    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
+        radius_buffer = img_size[0] / (subdiv[0]*n_radius*2*2)
+        azimuth_buffer = 2*np.pi / (subdiv[1]*n_azimuth*2)
+    else:
+        raise ValueError("Invalid subdivision")
+   
+    return radius_buffer, azimuth_buffer
 
 class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
@@ -272,3 +385,31 @@ class NativeScalerWithGradNormCount:
 
     def load_state_dict(self, state_dict):
         self._scaler.load_state_dict(state_dict)
+
+
+if __name__=='__main__':
+    import matplotlib.pyplot as plt
+    _, ax = plt.subplots(figsize=(8, 8))
+    ax.set_title("Sampling locations")
+    colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628']
+
+    subdiv = 3
+    n_radius = 8
+    n_azimuth = 8
+    img_size = (64, 64)
+    radius_buffer = img_size[0] / (n_radius * (2**(subdiv-1)) * 2 * 2)
+    azimuth_buffer = 2*np.pi / (n_azimuth * (2**(subdiv+1)) * 2)
+
+    params = get_sample_params_from_subdiv(
+        subdiv=subdiv,
+        img_size=img_size,
+        n_radius=n_radius,
+        n_azimuth=n_azimuth,
+        radius_buffer=radius_buffer,
+        azimuth_buffer=azimuth_buffer
+    )
+
+    for i in range(len(params)):
+        sample_locations = get_sample_locations(**params[i])
+        ax.scatter(*zip(*sample_locations), color=colors[i%len(colors)], s=6)
+    plt.show()
