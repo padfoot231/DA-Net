@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import torch.distributed as dist
 from torch._six import inf
+import scipy.optimize
 
 
 def load_checkpoint(config, model, optimizer, lr_scheduler, loss_scaler, logger):
@@ -307,12 +308,34 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, ra
     return x.reshape(-1), y.reshape(-1)
 
 
-def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_buffer=0, azimuth_buffer=0):
+def get_inverse_distortion(num_points, D, max_radius):
+    """Get the inverse distortion of a fisheye image
+    Args:
+        theta (ndarray): theta coordinates of the image
+        D (list[float]): a list containing the k1, k2, k3 and k4 parameters
+    Returns:
+        ndarray: the inverse distortion of the image
+    """
+    dist_func = lambda x: x * (1 + D[0]*x**2 + D[1]*x**4 + D[2]*x**6 + D[3]*x**8)
+    diff = lambda x, a: (dist_func(x) - a)**2
+
+    theta_max = dist_func(1)
+    theta = np.linspace(0, theta_max, num_points+1)
+    radius_list = np.zeros(theta.shape)
+
+    for idx, theta_val in enumerate(theta):
+        res = scipy.optimize.minimize(diff, 0.5, args=(theta_val,))
+        radius_list[idx] = res.x[0]
+
+    return max_radius*(radius_list - np.min(radius_list))/np.ptp(radius_list)
+
+
+def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, D=[0.5, 0.5, 0.5, 0.5], radius_buffer=0, azimuth_buffer=0):
     """Generate the required parameters to sample every patch based on the subdivison
 
     Args:
-        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
-                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
+        subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
+                                  samples. The format is (radius_subdiv, azimuth_subdiv)
         n_radius (int): number of radius samples
         n_azimuth (int): number of azimuth samples
         img_size (tuple): the size of the image
@@ -322,21 +345,9 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_
     """
     max_radius = min(img_size)/2
 
-    if isinstance(subdiv, int):
-        ds = max_radius / 2**(subdiv-1)
-        alpha = 2*np.pi / 2**(subdiv+1)
-    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
-        ds = max_radius / subdiv[0]
-        alpha = 2*np.pi / subdiv[1]
-    else:
-        raise ValueError("Invalid subdivision")
-    
-    dmin_start = 0
-    dmin_end = max_radius
-    dmin_step = ds
-
-    # walk backwards through the dmin list
-    dmin_list = np.flip(np.arange(dmin_start, dmin_end, dmin_step))
+    dmin_list = get_inverse_distortion(subdiv[0], D, max_radius)
+    ds_list = np.diff(dmin_list)
+    alpha = 2*np.pi / subdiv[1]
 
     phi_start = 0
     phi_end = 2*np.pi
@@ -345,40 +356,40 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_
 
     # Generate parameters for each patch
     params = []
-    for phi, dmin in itertools.product(phi_list, dmin_list):
+    for phi, idx in itertools.product(phi_list, range(len(ds_list))):
         params.append({
-            'alpha': alpha, "phi": phi, "dmin": dmin, "ds": ds, "n_azimuth": n_azimuth, "n_radius": n_radius,
+            'alpha': alpha, "phi": phi, "dmin": dmin_list[idx], "ds": ds_list[idx], "n_azimuth": n_azimuth, "n_radius": n_radius,
             "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer
         })
 
     return params
 
 
-def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
-    """Get the optimal radius and azimuth buffers for a given subdivision
+# def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
+#     """Get the optimal radius and azimuth buffers for a given subdivision
 
-    Args:
-        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
-                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
-        n_radius (int): number of radius samples
-        n_azimuth (int): number of azimuth samples
-        img_size (tuple): the size of the image
+#     Args:
+#         subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
+#                                          If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
+#         n_radius (int): number of radius samples
+#         n_azimuth (int): number of azimuth samples
+#         img_size (tuple): the size of the image
 
-    Returns:
-        tuple[int, int]: the optimal radius and azimuth buffers
-    """
+#     Returns:
+#         tuple[int, int]: the optimal radius and azimuth buffers
+#     """
 
-    # Get the optimal buffers
-    if isinstance(subdiv, int):
-        radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
-        azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
-    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
-        radius_buffer = img_size[0] / (radius_subdiv*n_radius*2*2)
-        azimuth_buffer = 2*np.pi / (azimuth_subdiv*n_azimuth*2)
-    else:
-        raise ValueError("Invalid subdivision")
+#     # Get the optimal buffers
+#     if isinstance(subdiv, int):
+#         radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
+#         azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
+#     elif isinstance(subdiv, tuple) and len(subdiv) == 2:
+#         radius_buffer = img_size[0] / (radius_subdiv*n_radius*2*2)
+#         azimuth_buffer = 2*np.pi / (azimuth_subdiv*n_azimuth*2)
+#     else:
+#         raise ValueError("Invalid subdivision")
    
-    return radius_buffer, azimuth_buffer
+#     return radius_buffer, azimuth_buffer
 
 
 class NativeScalerWithGradNormCount:
@@ -420,11 +431,12 @@ if __name__=='__main__':
     radius_subdiv = 16
     azimuth_subdiv = 64
     subdiv = (radius_subdiv, azimuth_subdiv)
-    subdiv = 3
-    n_radius = 8
+    # subdiv = 3
+    n_radius = 16
     n_azimuth = 8
     img_size = (64, 64)
-    radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
+    # radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
+    radius_buffer = azimuth_buffer = 0
 
     params = get_sample_params_from_subdiv(
         subdiv=subdiv,
