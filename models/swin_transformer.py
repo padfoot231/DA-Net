@@ -447,8 +447,8 @@ class PatchEmbed(nn.Module):
 
         
         # subdiv = 3
-        self.n_radius = 8
-        self.n_azimuth = 8
+        self.n_radius = 4
+        self.n_azimuth = 5
 
         radius_buffer, azimuth_buffer = get_optimal_buffers(self.subdiv, self.n_radius, self.n_azimuth, self.img_size)
 
@@ -460,15 +460,19 @@ class PatchEmbed(nn.Module):
             radius_buffer=radius_buffer,
             azimuth_buffer=azimuth_buffer
         )
-        x_ = []
-        y_ = []
+        out = torch.empty(len(params), 1,  self.n_radius*self.n_azimuth , 2)
         for i in range(len(params)):
             sample_locations = get_sample_locations(**params[i])
-            x_.append(sample_locations[0])
-            y_.append(sample_locations[1])
-        
-        self.x_ = x_
-        self.y_ = y_
+            # ax.scatter(*sample_locations, color=colors[i%len(colors)], s=6)
+            y_ = torch.tensor(sample_locations[0] - 32).reshape(1, 1, 20).float()
+            y_ = y_/64
+            x_ = -torch.tensor(sample_locations[1] - 32).reshape(1, 1, 20).float()
+            x_ = x_/64
+            t = torch.cat((x_, y_))
+            out[i] = t.transpose(0,1).transpose(1,2)
+
+        self.out = out
+
         
         ############################ 
         ## Use padding for every patch ### define everything in self function 
@@ -525,13 +529,14 @@ class PatchEmbed(nn.Module):
 
         for i in range(self.azimuth_cuts):
             # print(i, i*radius_subdiv)
-            tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
-            out = self.mlp(tensor)
-            out = out.contiguous().view(B, self.radius_cuts, -1).transpose(1,2)
+            tensor = nn.functional.grid_sample(x, self.out[i*self.radius_cuts :self.radius_cuts  + i*self.radius_cuts ].reshape(1, self.radius_cuts , self.radius_subdiv*self.azimuth_subdiv,2).repeat(B, 1, 1,1), align_corners = False).permute(0,2,1,3).contiguous().view(-1, self.radius_subdiv*self.azimuth_subdiv*self.in_chans)
+            # tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
+            out_ = self.mlp(tensor)
+            out_ = out_.contiguous().view(B, self.radius_cuts, -1).transpose(1,2)
             if i < self.azimuth_cuts//2:
-                x_out[:, :, 0:self.radius_cuts, self.azimuth_cuts//2-1-i] = out
+                x_out[:, :, 0:self.radius_cuts, self.azimuth_cuts//2-1-i] = out_
             else:
-                x_out[:,:, self.radius_cuts:2*self.radius_cuts, i-self.azimuth_cuts//2] = out
+                x_out[:,:, self.radius_cuts:2*self.radius_cuts, i-self.azimuth_cuts//2] = out_
             
     
 
