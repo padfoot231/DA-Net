@@ -470,7 +470,7 @@ class PatchEmbed(nn.Module):
             x_ = x_/64
             t = torch.cat((x_, y_))
             out[i] = t.transpose(0,1).transpose(1,2)
-
+        out = out.cuda()
         self.out = out
 
         
@@ -529,7 +529,7 @@ class PatchEmbed(nn.Module):
 
         for i in range(self.azimuth_cuts):
             # print(i, i*radius_subdiv)
-            tensor = nn.functional.grid_sample(x, self.out[i*self.radius_cuts :self.radius_cuts  + i*self.radius_cuts ].reshape(1, self.radius_cuts , self.radius_subdiv*self.azimuth_subdiv,2).repeat(B, 1, 1,1), align_corners = False).permute(0,2,1,3).contiguous().view(-1, self.radius_subdiv*self.azimuth_subdiv*self.in_chans)
+            tensor = nn.functional.grid_sample(x, self.out[i*self.radius_cuts :self.radius_cuts  + i*self.radius_cuts ].reshape(1, self.radius_cuts , self.n_azimuth*self.n_radius,2).repeat(B, 1, 1,1), align_corners = False).permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
             # tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
             out_ = self.mlp(tensor)
             out_ = out_.contiguous().view(B, self.radius_cuts, -1).transpose(1,2)
