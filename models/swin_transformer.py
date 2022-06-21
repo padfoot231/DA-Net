@@ -527,16 +527,24 @@ class PatchEmbed(nn.Module):
         ############################ projection layer ################
         x_out = torch.empty(B, self.embed_dim, self.radius_cuts*2, self.azimuth_cuts//2).cuda(non_blocking=True)
 
-        for i in range(self.azimuth_cuts):
+        # for i in range(self.azimuth_cuts):
             # print(i, i*radius_subdiv)
-            tensor = nn.functional.grid_sample(x, self.out[i*self.radius_cuts :self.radius_cuts  + i*self.radius_cuts ].reshape(1, self.radius_cuts , self.n_azimuth*self.n_radius,2).repeat(B, 1, 1,1), align_corners = False).permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
-            # tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
-            out_ = self.mlp(tensor)
-            out_ = out_.contiguous().view(B, self.radius_cuts, -1).transpose(1,2)
-            if i < self.azimuth_cuts//2:
-                x_out[:, :, 0:self.radius_cuts, self.azimuth_cuts//2-1-i] = out_
-            else:
-                x_out[:,:, self.radius_cuts:2*self.radius_cuts, i-self.azimuth_cuts//2] = out_
+        tensor = nn.functional.grid_sample(x, self.out.reshape(1, self.radius_cuts*self.azimuth_cuts, self.n_azimuth*self.n_radius,2).repeat(B, 1, 1,1), align_corners = True).permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
+        # tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
+        out_ = self.mlp(tensor)
+        out_ = out_.contiguous().view(B, self.radius_cuts*self.azimuth_cuts, -1)   # (B, 1024, embed_dim)
+
+
+        out_up  = out_[:, :self.radius_cuts*self.azimuth_cuts//2, :].reshape(B, self.azimuth_cuts//2, self.radius_cuts, self.embed_dim)
+        out_down  = out_[:,  self.radius_cuts*self.azimuth_cuts//2:, :].reshape(B,  self.azimuth_cuts//2, self.radius_cuts, self.embed_dim)
+
+        out_up = torch.flip(out_up, [1])  # (B,  az_div/2, rad_div, embed dim)
+        out_up = out_up.transpose(1, 3)
+        out_down = out_down.transpose(1,3)
+        x_out[:, :, :self.radius_cuts, :] = out_up
+
+        x_out[:, :, self.radius_cuts:, :] = out_down
+
             
     
 
