@@ -12,6 +12,7 @@ import random
 import argparse
 import datetime
 import numpy as np
+import wandb
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -29,7 +30,8 @@ from logger import create_logger
 from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScalerWithGradNormCount, auto_resume_helper, \
     reduce_tensor
 
-
+wandb.init(project="radial-transformer-distorted")
+# run_name = wandb.run.name
 def parse_option():
     parser = argparse.ArgumentParser('Swin Transformer training and evaluation script', add_help=False)
     parser.add_argument('--cfg', type=str, required=True, metavar="FILE", help='path to config file', )
@@ -183,6 +185,7 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
         loss = criterion(outputs, targets)
         loss = loss / config.TRAIN.ACCUMULATION_STEPS
 
+        wandb.log({"loss_train" : loss.item(), "epoch" : epoch})
         # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         grad_norm = loss_scaler(loss, optimizer, clip_grad=config.TRAIN.CLIP_GRAD,
@@ -249,6 +252,10 @@ def validate(config, data_loader, model):
         loss_meter.update(loss.item(), target.size(0))
         acc1_meter.update(acc1.item(), target.size(0))
         acc5_meter.update(acc5.item(), target.size(0))
+
+        wandb.log({"loss_val" : loss.item(), 
+                    "Acc1" : acc1, 
+                    "Acc5" : acc5})
 
         # measure elapsed time
         batch_time.update(time.time() - end)
