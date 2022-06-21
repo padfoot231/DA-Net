@@ -464,11 +464,11 @@ class PatchEmbed(nn.Module):
         for i in range(len(params)):
             sample_locations = get_sample_locations(**params[i])
             # ax.scatter(*sample_locations, color=colors[i%len(colors)], s=6)
-            y_ = torch.tensor(sample_locations[0] - 32).reshape(1, 1, 20).float()
-            y_ = y_/64
-            x_ = -torch.tensor(sample_locations[1] - 32).reshape(1, 1, 20).float()
+            x_ = torch.tensor(sample_locations[0]).reshape(1, 1, 20).float()
             x_ = x_/64
-            t = torch.cat((x_, y_))
+            y_ = torch.tensor(sample_locations[1]).reshape(1, 1, 20).float()
+            y_ = y_/64
+            t = torch.cat((-y_, x_))
             out[i] = t.transpose(0,1).transpose(1,2)
         out = out.cuda()
         self.out = out

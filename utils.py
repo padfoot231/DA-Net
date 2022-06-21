@@ -283,8 +283,8 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, ra
     azimuth = np.linspace(alpha_start, alpha_end, n_azimuth)
     azimuth_mesh, radius_mesh = np.meshgrid(azimuth, radius)
 
-    x = radius_mesh * np.cos(azimuth_mesh) + center[0]
-    y = radius_mesh * np.sin(azimuth_mesh) + center[1]
+    x = radius_mesh * np.cos(azimuth_mesh) 
+    y = radius_mesh * np.sin(azimuth_mesh) 
     
     return x.reshape(-1), y.reshape(-1)
 
