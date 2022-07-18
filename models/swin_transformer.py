@@ -10,7 +10,7 @@ import torch.nn as nn
 import numpy as np
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils import get_sample_params_from_subdiv, get_sample_locations, get_optimal_buffers
+from utils import get_sample_params_from_subdiv, get_sample_locations
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -447,31 +447,32 @@ class PatchEmbed(nn.Module):
 
         
         # subdiv = 3
-        self.n_radius = 4
-        self.n_azimuth = 5
+        self.n_radius = 25
+        self.n_azimuth = 25
 
-        radius_buffer, azimuth_buffer = get_optimal_buffers(self.subdiv, self.n_radius, self.n_azimuth, self.img_size)
+        # radius_buffer, azimuth_buffer = get_optimal_buffers(self.subdiv, self.n_radius, self.n_azimuth, self.img_size)
+        # radius_buffer = azimuth_buffer = 0
 
-        params = get_sample_params_from_subdiv(
-            subdiv=self.subdiv,
-            img_size=img_size,
-            n_radius=self.n_radius,
-            n_azimuth=self.n_azimuth,
-            radius_buffer=radius_buffer,
-            azimuth_buffer=azimuth_buffer
-        )
-        out = torch.empty(len(params), 1,  self.n_radius*self.n_azimuth , 2)
-        for i in range(len(params)):
-            sample_locations = get_sample_locations(**params[i])
-            # ax.scatter(*sample_locations, color=colors[i%len(colors)], s=6)
-            x_ = torch.tensor(sample_locations[0]).reshape(1, 1,self.n_radius*self.n_azimuth).float()
-            x_ = x_/32
-            y_ = torch.tensor(sample_locations[1]).reshape(1, 1, self.n_radius*self.n_azimuth).float()
-            y_ = y_/32
-            t = torch.cat((x_, -y_))
-            out[i] = t.transpose(0,1).transpose(1,2)
-        out = out.cuda()
-        self.out = out
+        # params = get_sample_params_from_subdiv(
+        #     subdiv=self.subdiv,
+        #     img_size=img_size,
+        #     n_radius=self.n_radius,
+        #     n_azimuth=self.n_azimuth,
+        #     radius_buffer=radius_buffer,
+        #     azimuth_buffer=azimuth_buffer
+        # )
+        # out = torch.empty(len(params), 1,  self.n_radius*self.n_azimuth , 2)
+        # for i in range(len(params)):
+        #     sample_locations = get_sample_locations(**params[i])
+        #     # ax.scatter(*sample_locations, color=colors[i%len(colors)], s=6)
+        #     x_ = torch.tensor(sample_locations[0]).reshape(1, 1,self.n_radius*self.n_azimuth).float()
+        #     x_ = x_/32
+        #     y_ = torch.tensor(sample_locations[1]).reshape(1, 1, self.n_radius*self.n_azimuth).float()
+        #     y_ = y_/32
+        #     t = torch.cat((x_, -y_))
+        #     out[i] = t.transpose(0,1).transpose(1,2)
+        # out = out.cuda()
+        # self.out = out
 
         
         ############################ 
@@ -517,19 +518,42 @@ class PatchEmbed(nn.Module):
         else:
             self.norm = None
 
-    def forward(self, x):
+    def forward(self, x, dist):
         B, C, H, W = x.shape
 
+        # print(dist.transpose(1,0).shape)
+
+        dist = dist.transpose(1,0)
+        radius_buffer, azimuth_buffer = 0, 0
+        params = get_sample_params_from_subdiv(
+            subdiv=self.subdiv,
+            img_size=self.img_size,
+            D = dist, 
+            n_radius=self.n_radius,
+            n_azimuth=self.n_azimuth,
+            radius_buffer=radius_buffer,
+            azimuth_buffer=azimuth_buffer)
+
+
+        sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
+        B, n_p, n_s = sample_locations[0].shape
+        x_ = sample_locations[0].reshape(B, n_p, n_s, 1).float()
+        x_ = x_/ 32
+        y_ = sample_locations[1].reshape(B, n_p, n_s, 1).float()
+        y_ = y_/32
+        out = torch.cat((x_, -(y_)), dim = 3)
+        out = out.cuda()
+        # print(out.shape)
+
         # FIXME look at relaxing size constraints
-        assert H == self.img_size[0] and W == self.img_size[1], \
-            f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        # assert H == self.img_size[0] and W == self.img_size[1], \
+        #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
 
         ############################ projection layer ################
         x_out = torch.empty(B, self.embed_dim, self.radius_cuts*2, self.azimuth_cuts//2).cuda(non_blocking=True)
 
-        # for i in range(self.azimuth_cuts):
-            # print(i, i*radius_subdiv)
-        tensor = nn.functional.grid_sample(x, self.out.reshape(1, self.radius_cuts*self.azimuth_cuts, self.n_azimuth*self.n_radius,2).repeat(B, 1, 1,1), align_corners = True).permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
+        tensor = nn.functional.grid_sample(x, out, align_corners = True).permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
+
         # tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
         out_ = self.mlp(tensor)
         out_ = out_.contiguous().view(B, self.radius_cuts*self.azimuth_cuts, -1)   # (B, 1024, embed_dim)
@@ -716,9 +740,9 @@ class SwinTransformer(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table'}
 
-    def forward_features(self, x):
+    def forward_features(self, x, dist):
         # print(x.shape)
-        x = self.patch_embed(x)
+        x = self.patch_embed(x, dist)
         # print(x.shape)
         # import pdb;pdb.set_trace()
         if self.ape:
@@ -733,8 +757,8 @@ class SwinTransformer(nn.Module):
         x = torch.flatten(x, 1)
         return x
 
-    def forward(self, x):
-        x = self.forward_features(x)
+    def forward(self, x, dist):
+        x = self.forward_features(x, dist)
         x = self.head(x)
         return x
 

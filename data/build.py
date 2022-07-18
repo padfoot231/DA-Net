@@ -6,6 +6,7 @@
 # --------------------------------------------------------
 
 import os
+from re import L
 import torch
 import numpy as np
 import torch.distributed as dist
@@ -17,6 +18,7 @@ from timm.data import create_transform
 from .cached_image_folder import CachedImageFolder
 from .imagenet22k_dataset import IN22KDATASET
 from .samplers import SubsetRandomSampler
+from .Distorted_imagenet import M_distort
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -107,7 +109,7 @@ def build_dataset(is_train, config):
         else:
             root = os.path.join(config.DATA.DATA_PATH, prefix)
             dataset = datasets.ImageFolder(root, transform=transform)
-        nb_classes = 1000
+        nb_classes = 200
     elif config.DATA.DATASET == 'imagenet22K':
         prefix = 'ILSVRC2011fall_whole'
         if is_train:
@@ -116,6 +118,14 @@ def build_dataset(is_train, config):
             ann_file = prefix + "_map_val.txt"
         dataset = IN22KDATASET(config.DATA.DATA_PATH, ann_file, transform)
         nb_classes = 21841
+    elif config.DATA.DATASET == 'distort':
+        if is_train:
+            dataset = M_distort(config.DATA.DATA_PATH, task = 'train', transform = transform)
+            nb_classes = 200
+        else:
+            dataset = M_distort(config.DATA.DATA_PATH, task = 'val', transform = transform)
+            nb_classes = 200
+
     else:
         raise NotImplementedError("We only support ImageNet Now.")
 

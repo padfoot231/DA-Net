@@ -14,8 +14,9 @@ import numpy as np
 import torch.distributed as dist
 from torch._six import inf
 import scipy.optimize
+from pyinstrument import Profiler
 
-
+profiler = Profiler(interval=0.0001)
 
 def load_checkpoint(config, model, optimizer, lr_scheduler, loss_scaler, logger):
     logger.info(f"==============> Resuming form {config.MODEL.RESUME}....................")
@@ -198,30 +199,27 @@ def ampscaler_get_grad_norm(parameters, norm_type: float = 2.0) -> torch.Tensor:
                                                         norm_type).to(device) for p in parameters]), norm_type)
     return total_norm
 
-def distort_image(img, f, D, shift=(0.0, 0.0), alpha=0.0) -> np.ndarray:
+def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
     """Distort an image using a fisheye distortion model
-
     Args:
         img (np.ndarray): the image to distort
-        f (float): the focal length of the camera
+        alpha (float): fov angle (radians)
         D (list[float]): a list containing the k1, k2, k3 and k4 parameters
         shift (tuple[float, float]): x and y shift (respectively)
-        alpha (float): the rotation angle (radians)
-
     Returns:
         np.ndarray: the distorted image
     """
     height, width, _ = img.shape
-    center = (height//2, width//2)
+    center = [height//2, width//2]
 
     # Image coordinates
     map_x, map_y = np.mgrid[0:height, 0:width].astype(np.float32)
 
     # Center coordinate system
-    if center[0] % 2 == 0:
-        map_x += 0.5
-    if center[1] % 2 == 0:
-        map_y += 0.5
+    if height % 2 == 0:
+        center[0] -= 0.5
+    if width % 2 == 0:
+        center[1] -= 0.5
 
     map_x -= center[0]
     map_y -= center[1]
@@ -230,31 +228,69 @@ def distort_image(img, f, D, shift=(0.0, 0.0), alpha=0.0) -> np.ndarray:
     r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
     theta = (r * (np.pi / 2)) / height
 
-    # Compute fisheye distortion
+    # Compute fisheye distortion with equidistant projection
     theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
-    rd = f * theta_d
+
+    # Scale so that image always fits the original size
+    f = map_y.max() / theta_d[int(center[0]), 0]
+    r_d = f * theta_d
 
     # Compute distorted map and rotate
-    map_xd = (rd / r) * (map_x + alpha * map_y) + center[0]
-    map_yd = (rd / r) * map_y + center[1]
+    map_xd = (r_d / r) * map_x + center[0]
+    map_yd = (r_d / r) * map_y + center[1]
 
     # Distort
     distorted_image = cv2.remap(
         img, map_yd, map_xd,
-        interpolation=cv2.INTER_LINEAR,
+        interpolation=cv2.INTER_CUBIC,
         borderMode=cv2.BORDER_CONSTANT,
     )
 
     return distorted_image
 
-def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, radius_buffer=0, azimuth_buffer=0):
+def distort_batch(x, alpha, D, shift=(0.0, 0.0), phi=0.0) :
+    """Distort a batch of images (in-place) using a fisheye distortion model (same as distort_image but for a batch of images)
+    Args:
+        x (torch.Tensor): the batch to distort
+        alpha (float): fov angle (radians)
+        D (list[float]): a list containing the k1, k2, k3 and k4 parameters
+        shift (tuple[float, float]): x and y shift (respectively)
+        phi (float): the rotation angle (radians)
+    Returns:
+        torch.Tensor: the distorted batch
+    """
+    arr = x.moveaxis(1, -1).numpy()
+    for i in range(arr.shape[0]):
+        arr[i] = distort_image(arr[i], alpha, D, shift, phi)
+    return x
+
+def linspace(start, stop, num):
+    """
+    Creates a tensor of shape [num, *start.shape] whose values are evenly spaced from start to end, inclusive.
+    Replicates but the multi-dimensional bahaviour of numpy.linspace in PyTorch.
+    """
+    # create a tensor of 'num' steps from 0 to 1
+    steps = torch.arange(num, dtype=torch.float32, device=start.device) / (num - 1)
+    
+    # reshape the 'steps' tensor to [-1, *([1]*start.ndim)] to allow for broadcastings
+    # - using 'steps.reshape([-1, *([1]*start.ndim)])' would be nice here but torchscript
+    #   "cannot statically infer the expected size of a list in this contex", hence the code below
+    for i in range(start.ndim):
+        steps = steps.unsqueeze(-1)
+    
+    # the output starts at 'start' and increments until 'stop' in each dimension
+    out = start[None] + steps*(stop - start)[None]
+    
+    return out
+
+def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, subdiv, radius_buffer=0, azimuth_buffer=0):
     """Get the sample locations in a given radius and azimuth range
     
     Args:
-        alpha (float): width of the azimuth range (radians)
-        phi (float): phase shift of the azimuth range  (radians)
-        dmin (float): minimum radius of the patch (pixels)
-        ds (float): distance between the inner and outer arcs of the patch (pixels)
+        alpha (array): width of the azimuth range (radians)
+        phi (array): phase shift of the azimuth range  (radians)
+        dmin (array): minimum radius of the patch (pixels)
+        ds (array): distance between the inner and outer arcs of the patch (pixels)
         n_azimuth (int): number of azimuth samples
         n_radius (int): number of radius samples
         img_size (tuple): the size of the image (width, height)
@@ -264,99 +300,145 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, ra
     Returns:
         tuple[ndarray, ndarray]: lists of x and y coordinates of the sample locations
     """
-
-    # Compute center of the image to shift the samples later
+    #Compute center of the image to shift the samples later
     center = [img_size[0]/2, img_size[1]/2]
     if img_size[0] % 2 == 0:
         center[0] -= 0.5
     if img_size[1] % 2 == 0:
         center[1] -= 0.5
-
+    # import pdb;pdb.set_trace()
     # Sweep start and end
-    r_start = dmin + ds - radius_buffer
-    r_end = dmin + radius_buffer
-    alpha_start = phi + azimuth_buffer
-    alpha_end = alpha + phi - azimuth_buffer
-
-    # Get the sample locations
-    radius = np.linspace(r_start, r_end, n_radius)
-    azimuth = np.linspace(alpha_start, alpha_end, n_azimuth)
-    azimuth_mesh, radius_mesh = np.meshgrid(azimuth, radius)
-
-    x = radius_mesh * np.cos(azimuth_mesh) 
-    y = radius_mesh * np.sin(azimuth_mesh) 
+    r_start = dmin + ds 
+    # - radius_buffer
+    r_end = dmin 
+    # + radius_buffer
+    alpha_start = phi 
+    B = dmin.shape[1]
     
-    return x.reshape(-1), y.reshape(-1)
+    # + azimuth_buffer
+    alpha_end = alpha + phi 
+    # - azimuth_buffer
+    # import pdb;pdb.set_trace()
+    # Get the sample locations
+    # import pdb;pdb.set_trace()
+    radius = linspace(r_start, r_end, n_radius)
+    radius = torch.transpose(radius, 0,1)
+    radius = radius.reshape(radius.shape[0]*radius.shape[1], B)
+    azimuth = linspace(alpha_start, alpha_end, n_azimuth)
+    azimuth = torch.transpose(azimuth, 0,1)
+    azimuth = azimuth.flatten()
+    azimuth = azimuth.reshape(azimuth.shape[0], 1).repeat_interleave(B, 1)
+
+    
+    azimuth = azimuth.reshape(1, azimuth.shape[0], B).repeat_interleave(n_radius, 0)
+    radius = radius.reshape(radius.shape[0], 1, B).repeat_interleave(n_azimuth, 1)
+    # radius = radius.repeat(n_azimuth, 1)
+    # import pdb;pdb.set_trace()
+    # azimuth_mesh, radius_mesh = np.meshgrid(azimuth, radius)
+
+    # radius_mesh = radius_mesh[:, :n_azimuth].reshape(subdiv[0]*subdiv[1], n_radius, n_azimuth)
+    # azimuth_mesh = azimuth_mesh[:n_radius, :].reshape(n_radius, subdiv[0]*subdiv[1], n_azimuth).transpose(1,0,2)  
+    # import pdb;pdb.set_trace()
+    radius_mesh = radius.reshape(subdiv[0]*subdiv[1], n_radius, n_azimuth, B)
+    azimuth_mesh = azimuth.reshape(n_radius, subdiv[0]*subdiv[1], n_azimuth, B).transpose(0,1)  
+    azimuth_mesh_cos  = torch.cos(azimuth_mesh) 
+    azimuth_mesh_sine = torch.sin(azimuth_mesh) 
+    x = radius_mesh * azimuth_mesh_cos    # takes time the cosine and multiplication function 
+    y = radius_mesh * azimuth_mesh_sine
+    
+    return x.reshape(subdiv[0]*subdiv[1], n_radius*n_azimuth, B).transpose(1, 2).transpose(0,1), y.reshape(subdiv[0]*subdiv[1], n_radius*n_azimuth, B).transpose(1, 2).transpose(0,1)
 
 
-def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, radius_buffer=0, azimuth_buffer=0):
+def get_inverse_distortion(num_points, D, max_radius):
+    dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (1 + torch.outer(D[0], x**2).flatten() + torch.outer(D[1], x**4).flatten() + torch.outer(D[2], x**6).flatten() +torch.outer(D[3], x**8).flatten())
+
+    theta_max = dist_func(torch.tensor([1]).cuda())
+    theta = linspace(torch.tensor([0]).cuda(), theta_max, num_points+1).cuda()
+
+    test_radius = torch.linspace(0, 1, 50).cuda()
+    test_theta = dist_func(test_radius).reshape(D.shape[1], 50).transpose(1,0)
+
+    radius_list = torch.zeros(num_points*D.shape[1]).reshape(num_points, D.shape[1]).cuda()
+    # import pdb;pdb.set_trace()
+    for i in range(D.shape[1]):
+        for j in range(num_points):
+            lower_idx = test_theta[:, i][test_theta[:, i] <= theta[:, i][j]].argmax()
+            upper_idx = lower_idx + 1
+
+            x_0, x_1 = test_radius[lower_idx], test_radius[upper_idx]
+            y_0, y_1 = test_theta[:, i][lower_idx], test_theta[:, i][upper_idx]
+
+            radius_list[:, i][j] = x_0 + (theta[:, i][j] - y_0) * (x_1 - x_0) / (y_1 - y_0)
+    
+    max_rad = torch.tensor([max_radius]*D.shape[1]).reshape(1, D.shape[1]).cuda()
+    return torch.cat((radius_list, max_rad), axis=0)
+def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda(), radius_buffer=0, azimuth_buffer=0):
     """Generate the required parameters to sample every patch based on the subdivison
     Args:
-        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
-                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
+        subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
+                                  samples. The format is (radius_subdiv, azimuth_subdiv)
         n_radius (int): number of radius samples
         n_azimuth (int): number of azimuth samples
         img_size (tuple): the size of the image
     Returns:
         list[dict]: the list of parameters to sample every patch
     """
+    # import pdb;pdb.set_trace()
     max_radius = min(img_size)/2
+    D_min = get_inverse_distortion(subdiv[0], D, max_radius)
+    # import pdb;pdb.set_trace()
+    # D_min = np.array(dmin_list)  ## del
+    D_s = torch.diff(D_min, axis = 0)
+    # D_s = np.array(ds_list)
+    alpha = 2*torch.tensor(np.pi).cuda() / subdiv[1]
+    # import pdb;pdb.set_trace()
 
-    if isinstance(subdiv, int):
-        ds = max_radius / 2**(subdiv-1)
-        alpha = 2*np.pi / 2**(subdiv+1)
-    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
-        ds = max_radius / subdiv[0]
-        alpha = 2*np.pi / subdiv[1]
-    else:
-        raise ValueError("Invalid subdivision")
-    
-    dmin_start = 0
-    dmin_end = max_radius
-    dmin_step = ds
-
-    # walk backwards through the dmin list
-    dmin_list = np.flip(np.arange(dmin_start, dmin_end, dmin_step))
-
+    D_min = D_min[:-1].reshape(1, subdiv[0], D.shape[1]).repeat_interleave(subdiv[1], 0).reshape(subdiv[0]*subdiv[1], D.shape[1])
+    D_s = D_s.reshape(1, subdiv[0], D.shape[1]).repeat_interleave(subdiv[1], 0).reshape(subdiv[0]*subdiv[1], D.shape[1])
     phi_start = 0
-    phi_end = 2*np.pi
+    phi_end = 2*torch.tensor(np.pi)
     phi_step = alpha
-    phi_list = np.arange(phi_start, phi_end, phi_step)
-
+    phi_list = torch.arange(phi_start, phi_end, phi_step)
+    p = phi_list.reshape(1, subdiv[1]).repeat_interleave(subdiv[0], 0)
+    phi = p.transpose(1,0).flatten().cuda()
+    alpha = alpha.repeat_interleave(subdiv[0]*subdiv[1])
     # Generate parameters for each patch
-    params = []
-    for phi, dmin in itertools.product(phi_list, dmin_list):
-        params.append({
-            'alpha': alpha, "phi": phi, "dmin": dmin, "ds": ds, "n_azimuth": n_azimuth, "n_radius": n_radius,
-            "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer
-        })
+    params = {
+        'alpha': alpha, "phi": phi, "dmin": D_min, "ds": D_s, "n_azimuth": n_azimuth, "n_radius": n_radius,
+        "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv
+    }
 
     return params
 
 
-def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
-    """Get the optimal radius and azimuth buffers for a given subdivision
-    Args:
-        subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
-                                         If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
-        n_radius (int): number of radius samples
-        n_azimuth (int): number of azimuth samples
-        img_size (tuple): the size of the image
-    Returns:
-        tuple[int, int]: the optimal radius and azimuth buffers
-    """
 
-    # Get the optimal buffers
-    if isinstance(subdiv, int):
-        radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
-        azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
-    elif isinstance(subdiv, tuple) and len(subdiv) == 2:
-        radius_buffer = img_size[0] / (subdiv[0]*n_radius*2*2)
-        azimuth_buffer = 2*np.pi / (subdiv[1]*n_azimuth*2)
-    else:
-        raise ValueError("Invalid subdivision")
+# def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
+#     """Get the optimal radius and azimuth buffers for a given subdivision
+
+#     Args:
+#         subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
+#                                          If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
+#         n_radius (int): number of radius samples
+#         n_azimuth (int): number of azimuth samples
+#         img_size (tuple): the size of the image
+
+#     Returns:
+#         tuple[int, int]: the optimal radius and azimuth buffers
+#     """
+
+#     # Get the optimal buffers
+#     if isinstance(subdiv, int):
+#         radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
+#         azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
+#     elif isinstance(subdiv, tuple) and len(subdiv) == 2:
+#         radius_buffer = img_size[0] / (radius_subdiv*n_radius*2*2)
+#         azimuth_buffer = 2*np.pi / (azimuth_subdiv*n_azimuth*2)
+#     else:
+#         raise ValueError("Invalid subdivision")
    
-    return radius_buffer, azimuth_buffer
+#     return radius_buffer, azimuth_buffer
+
+
 
 class NativeScalerWithGradNormCount:
     state_dict_key = "amp_scaler"
@@ -388,32 +470,37 @@ class NativeScalerWithGradNormCount:
 
 
 if __name__=='__main__':
-    import matplotlib.pyplot as plt
-    _, ax = plt.subplots(figsize=(8, 8))
-    ax.set_title("Sampling locations")
-    colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628']
+    profiler.start()
+    # import matplotlib.pyplot as plt
+    # _, ax = plt.subplots(figsize=(8, 8))
+    # ax.set_title("Sampling locations")
+    # colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628']
 
     # subdiv = 3
     radius_subdiv = 16
     azimuth_subdiv = 64
     subdiv = (radius_subdiv, azimuth_subdiv)
     # subdiv = 3
-    n_radius = 16
-    n_azimuth = 8
+    n_radius = 20
+    n_azimuth = 20
     img_size = (64, 64)
     # radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
     radius_buffer = azimuth_buffer = 0
+
+    D = torch.tensor(np.array([1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5]).reshape(2,4).transpose(1,0)).cuda()
+    # import pdb;pdb.set_trace()
 
     params = get_sample_params_from_subdiv(
         subdiv=subdiv,
         img_size=img_size,
         n_radius=n_radius,
+        D = D,
         n_azimuth=n_azimuth,
         radius_buffer=radius_buffer,
         azimuth_buffer=azimuth_buffer
     )
 
-    for i in range(len(params)):
-        sample_locations = get_sample_locations(**params[i])
-        ax.scatter(*sample_locations, color=colors[i%len(colors)], s=6)
-    plt.show()
+    sample_locations = get_sample_locations(**params)
+    profiler.stop()
+    profiler.print()
+    print(sample_locations[0].shape)

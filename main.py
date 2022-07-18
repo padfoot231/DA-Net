@@ -173,19 +173,20 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
 
     start = time.time()
     end = time.time()
-    for idx, (samples, targets) in enumerate(data_loader):
+    for idx, (samples, targets, dist) in enumerate(data_loader):
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
+        # print(targets)  
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
-
+        # print("targets", targets.argmax(1))
         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            outputs = model(samples)
+            outputs = model(samples, dist)
         loss = criterion(outputs, targets)
         loss = loss / config.TRAIN.ACCUMULATION_STEPS
 
-        wandb.log({"loss_train" : loss.item(), "epoch" : epoch})
+        
         # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         grad_norm = loss_scaler(loss, optimizer, clip_grad=config.TRAIN.CLIP_GRAD,
@@ -204,6 +205,8 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
         scaler_meter.update(loss_scale_value)
         batch_time.update(time.time() - end)
         end = time.time()
+
+        wandb.log({"loss_train" : loss.item(), "epoch" : epoch, "grad":norm_meter.val })
 
         if idx % config.PRINT_FREQ == 0:
             lr = optimizer.param_groups[0]['lr']
@@ -233,13 +236,13 @@ def validate(config, data_loader, model):
     acc5_meter = AverageMeter()
 
     end = time.time()
-    for idx, (images, target) in enumerate(data_loader):
+    for idx, (images, target, dist) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
         # compute output
         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            output = model(images)
+            output = model(images, dist)
 
         # measure accuracy and record loss
         loss = criterion(output, target)
@@ -278,16 +281,16 @@ def validate(config, data_loader, model):
 def throughput(data_loader, model, logger):
     model.eval()
 
-    for idx, (images, _) in enumerate(data_loader):
+    for idx, (images, _, dist) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         batch_size = images.shape[0]
         for i in range(50):
-            model(images)
+            model(images, dist)
         torch.cuda.synchronize()
         logger.info(f"throughput averaged with 30 times")
         tic1 = time.time()
         for i in range(30):
-            model(images)
+            model(images, dist)
         torch.cuda.synchronize()
         tic2 = time.time()
         logger.info(f"batch_size {batch_size} throughput {30 * batch_size / (tic2 - tic1)}")
