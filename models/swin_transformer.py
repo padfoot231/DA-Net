@@ -447,8 +447,8 @@ class PatchEmbed(nn.Module):
 
         
         # subdiv = 3
-        self.n_radius = 25
-        self.n_azimuth = 25
+        self.n_radius = 20
+        self.n_azimuth = 20
 
         # radius_buffer, azimuth_buffer = get_optimal_buffers(self.subdiv, self.n_radius, self.n_azimuth, self.img_size)
         # radius_buffer = azimuth_buffer = 0

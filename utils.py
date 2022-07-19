@@ -345,7 +345,7 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     azimuth_mesh_sine = torch.sin(azimuth_mesh) 
     x = radius_mesh * azimuth_mesh_cos    # takes time the cosine and multiplication function 
     y = radius_mesh * azimuth_mesh_sine
-    
+    # import pdb;pdb.set_trace()
     return x.reshape(subdiv[0]*subdiv[1], n_radius*n_azimuth, B).transpose(1, 2).transpose(0,1), y.reshape(subdiv[0]*subdiv[1], n_radius*n_azimuth, B).transpose(1, 2).transpose(0,1)
 
 
@@ -353,6 +353,7 @@ def get_inverse_distortion(num_points, D, max_radius):
     dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (1 + torch.outer(D[0], x**2).flatten() + torch.outer(D[1], x**4).flatten() + torch.outer(D[2], x**6).flatten() +torch.outer(D[3], x**8).flatten())
 
     theta_max = dist_func(torch.tensor([1]).cuda())
+    # import pdb;pdb.set_trace()
     theta = linspace(torch.tensor([0]).cuda(), theta_max, num_points+1).cuda()
 
     test_radius = torch.linspace(0, 1, 50).cuda()
@@ -370,8 +371,9 @@ def get_inverse_distortion(num_points, D, max_radius):
 
             radius_list[:, i][j] = x_0 + (theta[:, i][j] - y_0) * (x_1 - x_0) / (y_1 - y_0)
     
-    max_rad = torch.tensor([max_radius]*D.shape[1]).reshape(1, D.shape[1]).cuda()
-    return torch.cat((radius_list, max_rad), axis=0)
+    # import pdb;pdb.set_trace()
+    max_rad = torch.tensor([1]*D.shape[1]).reshape(1, D.shape[1]).cuda()
+    return torch.cat((radius_list, max_rad), axis=0)*max_radius
 def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda(), radius_buffer=0, azimuth_buffer=0):
     """Generate the required parameters to sample every patch based on the subdivison
     Args:
@@ -487,7 +489,7 @@ if __name__=='__main__':
     # radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
     radius_buffer = azimuth_buffer = 0
 
-    D = torch.tensor(np.array([1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.5]).reshape(2,4).transpose(1,0)).cuda()
+    D = torch.tensor(np.array([0.0, 0.0, 0.0, 0.0]).reshape(1,4).transpose(1,0)).cuda()
     # import pdb;pdb.set_trace()
 
     params = get_sample_params_from_subdiv(
@@ -499,6 +501,8 @@ if __name__=='__main__':
         radius_buffer=radius_buffer,
         azimuth_buffer=azimuth_buffer
     )
+
+    # import pdb;pdb.set_trace()
 
     sample_locations = get_sample_locations(**params)
     profiler.stop()
