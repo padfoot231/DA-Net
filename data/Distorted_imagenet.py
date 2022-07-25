@@ -1,35 +1,43 @@
+from dis import dis
 import os
 import json
 import torch.utils.data as data
 import numpy as np
 from PIL import Image
-# from utils import get_sample_params_from_subdiv, get_sample_locations, get_optimal_buffers 
+from utils import get_sample_params_from_subdiv, get_sample_locations, distort_image
 import warnings
 import torch 
 from glob import glob
 import pickle as pkl
 import torch.nn as nn
 from datetime import datetime
-
+import random
 from pyinstrument import Profiler
 
 warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
 
 
+def random_1():
+    return 1 if random.random() < 0.5 else -1
 
+def get_random_distortion_params(high=1):
+    points = np.abs(np.random.normal(size=4))
+    norm = np.sqrt((points**2).sum(axis=0))
+    scale = high * np.random.uniform(low=0, high=1)**(1/4)
+    return (points * scale / norm).tolist()
 
 
 class M_distort(data.Dataset):
     def __init__(self, root, transform=None, task=None, target_transform=None, radius_cuts=16, azimuth_cuts=64, in_chans=3, img_size=(64, 64)):
         super(M_distort, self).__init__()
         self.data_path = root
-        self.in_chans = in_chans
-        self.subdiv = (radius_cuts, azimuth_cuts)
-        self.n_radius = 15
-        self.n_azimuth = 15
+        # self.in_chans = in_chans
+        # self.subdiv = (radius_cuts, azimuth_cuts)
+        # self.n_radius = 15
+        # self.n_azimuth = 15
         self.img_size = img_size
 
-        with open('/home-local2/akath.extra.nobkp/all-distorted-full-imagenet/classes.pkl', 'rb') as f:
+        with open('/home-local2/akath.extra.nobkp/classes_custom.pkl', 'rb') as f:
             classes = pkl.load(f)
         
         self.classes = classes
@@ -37,12 +45,12 @@ class M_distort(data.Dataset):
         #     distortion  = pkl.load(f)
         # lst = []
         if task == 'train':
-            with open(self.data_path + '/train/distortion_train_file.pkl', 'rb') as f:
+            with open(self.data_path + '/train/train_custom.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/train_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         elif task == 'val':
-            with open(self.data_path + '/val/distortion_val_file.pkl', 'rb') as f:
+            with open(self.data_path + '/val/val_custom.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/val_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
@@ -51,7 +59,6 @@ class M_distort(data.Dataset):
         # classes = list(data.keys())
 
         # self.test = data
-        keys = list(data.keys())
 
         # data_img = {}
 
@@ -66,7 +73,6 @@ class M_distort(data.Dataset):
         #         idx = idx+1
         
         # self.data_img = data_img
-        self.keys = keys
         self.data = data
         self.transform = transform
         self.target_transform = target_transform
@@ -122,14 +128,25 @@ class M_distort(data.Dataset):
 #         out = torch.cat((x_, -(y_)), dim = 3)
 
         # print("end_sample_location")
-        images = Image.open(self.data_path + '/' + self.keys[index])
+        images = Image.open(self.data_path + '/' + self.data[index])
+
+        D = get_random_distortion_params()
+        # import pdb;pdb.set_trace()
+        k1 = D[0]*300
+        k2 = D[1]*20*random_1()
+        k3 = D[2]*30
+        k4 = D[3]*10*random_1()
+        D = [k1, k2, k3, k4]
+
+        images = distort_image(images, D)
+
 
         # images.shape
 
         # out = self.data[self.data_img[index][0]]
 
 
-        target = int(self.classes.index(self.keys[index].split('/')[1]))
+        target = int(self.classes.index(self.data[index].split('/')[1]))
 
         # distortion = self.data_img[index][2]
         # print(distortion)
@@ -168,10 +185,10 @@ class M_distort(data.Dataset):
         # current_time = now.strftime("%H:%M:%S")
         # print("Current Time =", current_time)
         # print(index)
-        return images, target, np.array(self.data[self.keys[index]])
+        return images, target, np.array(D)
 
     def __len__(self):
-        return len(self.keys)
+        return len(self.data)
 
 if __name__=='__main__':
 

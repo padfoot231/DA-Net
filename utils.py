@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch._six import inf
 import scipy.optimize
 from pyinstrument import Profiler
-
+from PIL import Image
 profiler = Profiler(interval=0.0001)
 
 def load_checkpoint(config, model, optimizer, lr_scheduler, loss_scaler, logger):
@@ -209,7 +209,16 @@ def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
     Returns:
         np.ndarray: the distorted image
     """
-    height, width, _ = img.shape
+
+    img = img.resize((224, 224), Image.ANTIALIAS)
+    img = np.array(img)
+    # print(img.shape)
+    
+    try:
+        height, width, _= img.shape
+    except:
+        img = np.stack((img, img, img), axis=2)
+        height, width, _= img.shape
     center = [height//2, width//2]
 
     # Image coordinates
@@ -246,7 +255,11 @@ def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
         borderMode=cv2.BORDER_CONSTANT,
     )
 
-    return distorted_image
+    distorted_image = Image.fromarray(distorted_image)
+    distorted_image = distorted_image.resize((64, 64), Image.ANTIALIAS)
+    rgb_im = distorted_image.convert('RGB')
+
+    return rgb_im
 
 def distort_batch(x, alpha, D, shift=(0.0, 0.0), phi=0.0) :
     """Distort a batch of images (in-place) using a fisheye distortion model (same as distort_image but for a batch of images)

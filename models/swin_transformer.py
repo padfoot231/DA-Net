@@ -521,6 +521,9 @@ class PatchEmbed(nn.Module):
     def forward(self, x, dist):
         B, C, H, W = x.shape
 
+        # print(H, W, "image_shaep")
+        # print(self.img_size, "image_size")
+        # import pdb;pdb.set_trace()
         # print(dist.transpose(1,0).shape)
 
         dist = dist.transpose(1,0)
@@ -551,7 +554,6 @@ class PatchEmbed(nn.Module):
 
         ############################ projection layer ################
         x_out = torch.empty(B, self.embed_dim, self.radius_cuts*2, self.azimuth_cuts//2).cuda(non_blocking=True)
-
         tensor = nn.functional.grid_sample(x, out, align_corners = True).permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
 
         # tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
@@ -612,7 +614,7 @@ class PatchEmbed(nn.Module):
         # print(x_.shape, x_.device)
         # import pdb;pdb.set_trace()
         x = x_out.flatten(2).transpose(1, 2)  # B Ph*Pw C
-        # print(x_out.shape)
+        # import pdb;pdb.set_trace()
         # import pdb;pdb.set_trace()
         if self.norm is not None:
             x = self.norm(x)
