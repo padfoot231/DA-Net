@@ -235,7 +235,7 @@ class SwinTransformerBlock(nn.Module):
 
         self.register_buffer("attn_mask", attn_mask)
 
-    def forward(self, x):
+    def forward(self, x, ct):
         # import pdb;pdb.set_trace()
         H, W = self.input_resolution
         B, L, C = x.shape
@@ -243,7 +243,16 @@ class SwinTransformerBlock(nn.Module):
 
         shortcut = x
         x = self.norm1(x)
-        x = x.view(B, H, W, C)
+        # import pdb;pdb.set_trace()
+        if ct == 0:
+            x = x.view(B, H, W, C)
+        if ct == 1:
+            x = x.view(B, 32, 8, C)
+            x = torch.cat((x[:, :16], x[:, 16:].flip(1)), 2)
+        elif ct == 2:
+            x = x.reshape(B, 4, 16, C)
+        elif ct ==3:
+            x = x.reshape(B, 1, 16, C)
 
         # cyclic shift
         if self.shift_size[1] > 0:
@@ -404,13 +413,14 @@ class BasicLayer(nn.Module):
         else:
             self.downsample = None
 
-    def forward(self, x):
+    def forward(self, x, ct):
+        # import pdb;pdb.set_trace()
         # import pdb;pdb.set_trace()
         for blk in self.blocks:
             if self.use_checkpoint:
-                x = checkpoint.checkpoint(blk, x)
+                x = checkpoint.checkpoint(blk, x, ct)
             else:
-                x = blk(x)
+                x = blk(x, ct)
         if self.downsample is not None:
             x = self.downsample(x)
         return x
@@ -728,11 +738,11 @@ class SwinTransformer(nn.Module):
             if i_layer == 0:
                 input_resolution = patches_resolution
             elif i_layer == 1:
-                input_resolution = [patches_resolution[0], patches_resolution[1]//4]
+                input_resolution = [16, 16]
             elif i_layer == 2:
-                input_resolution = [patches_resolution[0]//2, patches_resolution[1]//8]
+                input_resolution = [4, 16]
             elif i_layer == 3:
-                input_resolution = [patches_resolution[0]//8, patches_resolution[1]//8]
+                input_resolution = [1, 16]
 
             layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
                                input_resolution=input_resolution,
@@ -779,9 +789,10 @@ class SwinTransformer(nn.Module):
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
-
+        ct = 0
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x, ct)
+            ct += 1
 
         x = self.norm(x)  # B L C
         x = self.avgpool(x.transpose(1, 2))  # B C 1
@@ -816,7 +827,7 @@ if __name__=='__main__':
                                 embed_dim=96,
                                 depths=[2, 2, 6, 2],
                                 num_heads=[3, 6, 12, 24],
-                                window_size=(1,4),
+                                window_size=(1,16),
                                 mlp_ratio=4,
                                 qkv_bias=True,
                                 qk_scale=None,
@@ -830,5 +841,6 @@ if __name__=='__main__':
 
     model = model.cuda()
     output = model(inp, dist)
+    import pdb;pdb.set_trace()
 
 
