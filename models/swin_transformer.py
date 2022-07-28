@@ -549,7 +549,6 @@ class PatchEmbed(nn.Module):
     def forward(self, x, dist):
         B, C, H, W = x.shape
 
-
         # print(H, W, "image_shaep")
         # print(self.img_size, "image_size")
         # import pdb;pdb.set_trace()
@@ -648,6 +647,7 @@ class PatchEmbed(nn.Module):
         # import pdb;pdb.set_trace()
         if self.norm is not None:
             x = self.norm(x)
+        import pdb;pdb.set_trace()
         return x
 
     def flops(self):
@@ -815,8 +815,7 @@ class SwinTransformer(nn.Module):
 
 
 if __name__=='__main__':
-    inp = torch.ones((1, 3, 64, 64)).cuda()
-
+    inp = torch.arange(3*64*64).reshape((1, 3, 64, 64)).float().cuda()
     dist = torch.tensor([0.5, 0.5, 0.5, 0.5]).reshape(1,4).cuda()
 
     model = SwinTransformer(img_size=(64, 64),
