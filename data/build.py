@@ -136,7 +136,7 @@ def build_transform(is_train, config):
     resize_im = config.DATA.IMG_SIZE > 32
     if is_train:
         # this should always dispatch to transforms_imagenet_train
-        transform = create_transform(
+        transform_crop, transform = create_transform(
             input_size=config.DATA.IMG_SIZE,
             is_training=True,
             color_jitter=config.AUG.COLOR_JITTER if config.AUG.COLOR_JITTER > 0 else None,
@@ -145,6 +145,8 @@ def build_transform(is_train, config):
             re_mode=config.AUG.REMODE,
             re_count=config.AUG.RECOUNT,
             interpolation=config.DATA.INTERPOLATION,
+            separate=True,
+
         )
         # if not resize_im:
         #     # replace RandomResizedCropAndInterpolation with
@@ -153,19 +155,19 @@ def build_transform(is_train, config):
         return transform
 
     t = []
-    if resize_im:
-        if config.TEST.CROP:
-            size = int((256 / 224) * config.DATA.IMG_SIZE)
-            t.append(
-                transforms.Resize(size, interpolation=_pil_interp(config.DATA.INTERPOLATION)),
-                # to maintain same ratio w.r.t. 224 images
-            )
-            t.append(transforms.CenterCrop(config.DATA.IMG_SIZE))
-        else:
-            t.append(
-                transforms.Resize((config.DATA.IMG_SIZE, config.DATA.IMG_SIZE),
-                                  interpolation=_pil_interp(config.DATA.INTERPOLATION))
-            )
+    # if resize_im:
+    #     if config.TEST.CROP:
+    #         size = int((256 / 224) * config.DATA.IMG_SIZE)
+    #         t.append(
+    #             transforms.Resize(size, interpolation=_pil_interp(config.DATA.INTERPOLATION)),
+    #             # to maintain same ratio w.r.t. 224 images
+    #         )
+    #         t.append(transforms.CenterCrop(config.DATA.IMG_SIZE))
+    #     else:
+    #         t.append(
+    #             transforms.Resize((config.DATA.IMG_SIZE, config.DATA.IMG_SIZE),
+    #                               interpolation=_pil_interp(config.DATA.INTERPOLATION))
+    #         )
 
     t.append(transforms.ToTensor())
     t.append(transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD))
