@@ -146,10 +146,10 @@ def build_transform(is_train, config):
             re_count=config.AUG.RECOUNT,
             interpolation=config.DATA.INTERPOLATION,
         )
-        if not resize_im:
-            # replace RandomResizedCropAndInterpolation with
-            # RandomCrop
-            transform.transforms[0] = transforms.RandomCrop(config.DATA.IMG_SIZE, padding=4)
+        # if not resize_im:
+        #     # replace RandomResizedCropAndInterpolation with
+        #     # RandomCrop
+        #     transform.transforms[0] = transforms.RandomCrop(config.DATA.IMG_SIZE, padding=4)
         return transform
 
     t = []
