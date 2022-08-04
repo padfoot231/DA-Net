@@ -20,11 +20,27 @@ warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
 def random_1():
     return 1 if random.random() < 0.5 else -1
 
-def get_random_distortion_params(high=1):
-    points = np.abs(np.random.normal(size=4))
-    norm = np.sqrt((points**2).sum(axis=0))
-    scale = high * np.random.uniform(low=0, high=1)**(1/4)
-    return (points * scale / norm).tolist()
+
+
+def random_direction_normal(dim, n):
+    p = np.abs(np.random.standard_normal((dim, n)))
+    norm = np.sqrt(np.sum(p**2, axis=0))
+    return p / norm
+
+def random_direction_uniform(dim, n):
+    p = np.random.uniform(0, 1, (dim, n))
+    norm = np.sqrt(np.sum(p**2, axis=0))
+    return p / norm
+
+def random_magnitude_uniform(points, high=1):
+    scale = np.random.uniform(0, high, points.shape[1])
+    return points * scale
+
+def random_magnitude_custom(points, high=1):
+    scale = np.random.uniform(0, high, points.shape[1])**(1/points.shape[0])
+    return points * scale
+
+
 
 
 class M_distort(data.Dataset):
@@ -130,14 +146,9 @@ class M_distort(data.Dataset):
         # print("end_sample_location")
         images = Image.open(self.data_path + '/' + self.data[index])
 
-        D = get_random_distortion_params()
-        # import pdb;pdb.set_trace()
-        k1 = D[0]*300
-        k2 = D[1]*20*random_1()
-        k3 = D[2]*30
-        k4 = D[3]*10*random_1()
-        D = [k1, k2, k3, k4]
-
+        points = random_direction_normal(4, 1)
+        D = random_magnitude_uniform(points, high=10)
+        import pdb;pdb.set_trace()
         images = distort_image(images, D)
 
 
