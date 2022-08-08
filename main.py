@@ -236,6 +236,9 @@ def validate(config, data_loader, model):
     acc5_meter = AverageMeter()
 
     end = time.time()
+    running_loss = 0
+    running_acc1 = 0
+    running_acc5 = 0
     for idx, (images, target, dist) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
@@ -255,10 +258,9 @@ def validate(config, data_loader, model):
         loss_meter.update(loss.item(), target.size(0))
         acc1_meter.update(acc1.item(), target.size(0))
         acc5_meter.update(acc5.item(), target.size(0))
-
-        wandb.log({"loss_val" : loss.item(), 
-                    "Acc1" : acc1, 
-                    "Acc5" : acc5})
+        # wandb.log({"loss_val" : loss.item(), 
+        #             "Acc1" : acc1, 
+        #             "Acc5" : acc5})
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -274,7 +276,12 @@ def validate(config, data_loader, model):
                 f'Acc@5 {acc5_meter.val:.3f} ({acc5_meter.avg:.3f})\t'
                 f'Mem {memory_used:.0f}MB')
     logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
+    wandb.log({"loss_val_avg" :loss_meter.avg, 
+            "Acc1_avg" : acc1_meter.avg, 
+            "Acc5_avg" :  acc5_meter.avg})
+
     return acc1_meter.avg, acc5_meter.avg, loss_meter.avg
+
 
 
 @torch.no_grad()

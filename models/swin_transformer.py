@@ -311,8 +311,12 @@ class SwinTransformerBlock(nn.Module):
         # norm1
         flops += self.dim * H * W
         # W-MSA/SW-MSA
-        nW = H * W / self.window_size / self.window_size
-        flops += nW * self.attn.flops(self.window_size * self.window_size)
+        if type(self.window_size) is tuple:
+            nW = H * W / self.window_size[0] / self.window_size[1]
+            flops += nW * self.attn.flops(self.window_size[0] * self.window_size[1])
+        else:
+            nW = H * W / self.window_size / self.window_size
+            flops += nW * self.attn.flops(self.window_size * self.window_size)
         # mlp
         flops += 2 * H * W * self.dim * self.dim * self.mlp_ratio
         # norm2
