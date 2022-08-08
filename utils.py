@@ -202,7 +202,7 @@ def ampscaler_get_grad_norm(parameters, norm_type: float = 2.0) -> torch.Tensor:
 def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
     """Distort an image using a fisheye distortion model
     Args:
-        img (np.ndarray): the image to distort
+        img (PIL): the image to distort
         alpha (float): fov angle (radians)
         D (list[float]): a list containing the k1, k2, k3 and k4 parameters
         shift (tuple[float, float]): x and y shift (respectively)

@@ -144,7 +144,7 @@ def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler,
                   'epoch': epoch,
                   'config': config}
 
-    if epoch%50 == 0:
+    if epoch%5 == 0:
         save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}.pth')
         logger.info(f"{save_path} saving......")
         torch.save(save_state, save_path)
@@ -202,7 +202,7 @@ def ampscaler_get_grad_norm(parameters, norm_type: float = 2.0) -> torch.Tensor:
 def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
     """Distort an image using a fisheye distortion model
     Args:
-        img (np.ndarray): the image to distort
+        img (PIL): the image to distort
         alpha (float): fov angle (radians)
         D (list[float]): a list containing the k1, k2, k3 and k4 parameters
         shift (tuple[float, float]): x and y shift (respectively)
@@ -210,7 +210,7 @@ def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
         np.ndarray: the distorted image
     """
 
-    img = img.resize((224, 224), Image.ANTIALIAS)
+    # img = img.resize((224, 224), Image.ANTIALIAS)
     img = np.array(img)
     # print(img.shape)
     
@@ -256,7 +256,7 @@ def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
     )
 
     distorted_image = Image.fromarray(distorted_image)
-    distorted_image = distorted_image.resize((64, 64), Image.ANTIALIAS)
+    # distorted_image = distorted_image.resize((64, 64), Image.ANTIALIAS)
     rgb_im = distorted_image.convert('RGB')
 
     return rgb_im
@@ -363,6 +363,7 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
 
 
 def get_inverse_distortion(num_points, D, max_radius):
+    # import pdb;pdb.set_trace()
     dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (1 + torch.outer(D[0], x**2).flatten() + torch.outer(D[1], x**4).flatten() + torch.outer(D[2], x**6).flatten() +torch.outer(D[3], x**8).flatten())
 
     theta_max = dist_func(torch.tensor([1]).cuda())

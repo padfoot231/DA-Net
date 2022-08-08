@@ -44,7 +44,7 @@ def random_magnitude_custom(points, high=1):
 
 
 class M_distort(data.Dataset):
-    def __init__(self, root, transform=None, task=None, target_transform=None, radius_cuts=16, azimuth_cuts=64, in_chans=3, img_size=(64, 64)):
+    def __init__(self, root, transform=None, task='train', target_transform=None, radius_cuts=16, azimuth_cuts=64, in_chans=3, img_size=(64, 64)):
         super(M_distort, self).__init__()
         self.data_path = root
         # self.in_chans = in_chans
@@ -147,9 +147,10 @@ class M_distort(data.Dataset):
         images = Image.open(self.data_path + '/' + self.data[index])
 
         points = random_direction_normal(4, 1)
-        D = random_magnitude_uniform(points, high=10)
-        import pdb;pdb.set_trace()
-        images = distort_image(images, D)
+        D = random_magnitude_uniform(points, high=10).T
+        images.save("test.png")
+        images = distort_image(images, D[0])
+        images.save("test_dis.png")
 
 
         # images.shape
@@ -196,13 +197,15 @@ class M_distort(data.Dataset):
         # current_time = now.strftime("%H:%M:%S")
         # print("Current Time =", current_time)
         # print(index)
-        return images, target, np.array(D)
+        return images, target, D[0]
 
     def __len__(self):
         return len(self.data)
 
 if __name__=='__main__':
 
-    m = M_distort
+    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_full', task='train')
+    # import pdb;pdb.set_trace()
+    m[1]
     
 

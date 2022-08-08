@@ -5,6 +5,7 @@
 # Written by Ze Liu
 # --------------------------------------------------------
 
+# from curses import window
 import torch
 import torch.nn as nn
 import numpy as np
@@ -40,10 +41,17 @@ def window_partition(x, window_size):
     Returns:
         windows: (num_windows*B, window_size, window_size, C)
     """
+    # print(x.shape)
+    # import pdb;pdb.set_trace()
     B, H, W, C = x.shape
-    x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
-    return windows
+    if type(window_size) is tuple:
+        x = x.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1], C)
+        windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size[0], window_size[1], C)
+        return windows
+    else:
+        x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
+        windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
+        return windows
 
 
 def window_reverse(windows, window_size, H, W):
@@ -57,8 +65,12 @@ def window_reverse(windows, window_size, H, W):
     Returns:
         x: (B, H, W, C)
     """
-    B = int(windows.shape[0] / (H * W / window_size / window_size))
-    x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
+    if type(window_size) is tuple:
+        B = int(windows.shape[0] / (H * W / window_size[0] / window_size[1]))
+        x = windows.view(B, H // window_size[0], W // window_size[1], window_size[0], window_size[1], -1)
+    else:
+        B = int(windows.shape[0] / (H * W / window_size / window_size))
+        x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
     return x
 
@@ -78,8 +90,10 @@ class WindowAttention(nn.Module):
     """
 
     def __init__(self, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
-
+        # import pdb;pdb.set_trace()
         super().__init__()
+        # print("window_size", window_size)
+        # import pdb;pdb.set_trace()
         self.dim = dim
         self.window_size = window_size  # Wh, Ww
         self.num_heads = num_heads
@@ -103,7 +117,7 @@ class WindowAttention(nn.Module):
         relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
         self.register_buffer("relative_position_index", relative_position_index)
 
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.qkv = nn.Linear(dim, dim * 3, bias=4)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
@@ -114,8 +128,10 @@ class WindowAttention(nn.Module):
         """
         Args:
             x: input features with shape of (num_windows*B, N, C)
-            mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
+            mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or Nonem
+
         """
+        
         B_, N, C = x.shape
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
@@ -190,16 +206,21 @@ class SwinTransformerBlock(nn.Module):
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
-        if min(self.input_resolution) <= self.window_size:
+        if min(self.input_resolution) < self.window_size:
             # if window size is larger than input resolution, we don't partition windows
             self.shift_size = 0
-            self.window_size = min(self.input_resolution)
-        assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
-
-        self.norm1 = norm_layer(dim)
-        self.attn = WindowAttention(
+            self.window_size = (min(self.input_resolution),self.input_resolution[1]) 
+            self.attn = WindowAttention(
+            dim, window_size=self.window_size, num_heads=num_heads,
+            qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        else:
+            self.attn = WindowAttention(
             dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+            assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
+
+        self.norm1 = norm_layer(dim)
+
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -248,13 +269,23 @@ class SwinTransformerBlock(nn.Module):
 
         # partition windows
         x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
-        x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # nW*B, window_size*window_size, C
+        if type(self.window_size) is tuple:
+            x_windows = x_windows.view(-1, self.window_size[0] * self.window_size[1], C)  # nW*B, window_size*window_size, C
 
-        # W-MSA/SW-MSA
-        attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
+            # W-MSA/SW-MSA
+            attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
 
-        # merge windows
-        attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
+            # merge windows
+            attn_windows = attn_windows.view(-1, self.window_size[0], self.window_size[1], C)
+        else:
+            x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # nW*B, window_size*window_size, C
+
+            # W-MSA/SW-MSA
+            attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
+
+            # merge windows
+            attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
+
         shifted_x = window_reverse(attn_windows, self.window_size, H, W)  # B H' W' C
 
         # reverse cyclic shift
@@ -425,7 +456,7 @@ class PatchEmbed(nn.Module):
 
         #number of MLPs is number of patches
         #patch_size if needed
-        patches_resolution = [2*radius_cuts, azimuth_cuts//2]  ### azimuth is always cut in even partition 
+        patches_resolution = [radius_cuts, azimuth_cuts]  ### azimuth is always cut in even partition 
         self.azimuth_cuts = azimuth_cuts
         self.radius_cuts = radius_cuts
         self.subdiv = (self.radius_cuts, self.azimuth_cuts)
@@ -448,68 +479,6 @@ class PatchEmbed(nn.Module):
         # subdiv = 3
         self.n_radius = 20
         self.n_azimuth = 20
-
-        # radius_buffer, azimuth_buffer = get_optimal_buffers(self.subdiv, self.n_radius, self.n_azimuth, self.img_size)
-        # radius_buffer = azimuth_buffer = 0
-
-        # params = get_sample_params_from_subdiv(
-        #     subdiv=self.subdiv,
-        #     img_size=img_size,
-        #     n_radius=self.n_radius,
-        #     n_azimuth=self.n_azimuth,
-        #     radius_buffer=radius_buffer,
-        #     azimuth_buffer=azimuth_buffer
-        # )
-        # out = torch.empty(len(params), 1,  self.n_radius*self.n_azimuth , 2)
-        # for i in range(len(params)):
-        #     sample_locations = get_sample_locations(**params[i])
-        #     # ax.scatter(*sample_locations, color=colors[i%len(colors)], s=6)
-        #     x_ = torch.tensor(sample_locations[0]).reshape(1, 1,self.n_radius*self.n_azimuth).float()
-        #     x_ = x_/32
-        #     y_ = torch.tensor(sample_locations[1]).reshape(1, 1, self.n_radius*self.n_azimuth).float()
-        #     y_ = y_/32
-        #     t = torch.cat((x_, -y_))
-        #     out[i] = t.transpose(0,1).transpose(1,2)
-        # out = out.cuda()
-        # self.out = out
-
-        
-        ############################ 
-        ## Use padding for every patch ### define everything in self function 
-        # masks = []
-        # mlp = []
-        # dim_out_in = []
-        # for rad in range(len(range(radius_cuts))):
-        #     num_features = []
-        #     for the in range(len(range(azimuth_cuts))):
-        #         if the < (azimuth_cuts//2):
-        #             mask = (radius < 1) &(radius < (self.measurement - patch_size[0]*rad)) & (radius >  self.measurement - patch_size[0]*(rad+1)) & (azimuth< (np.pi - patch_size[1]*the)) & (azimuth > (np.pi - patch_size[1]*(the+1)))
-        #             mask = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (img_size), mode="area")
-        #             mask = mask*1.0
-        #             mask = mask.cuda()
-        #             count = torch.count_nonzero(mask)
-        #             num_features.append(count)
-        #             masks.append(mask)
-        #         else:
-        #             mask = (radius < 1)  &(radius < (self.measurement - patch_size[0]*rad)) & (radius >  self.measurement - patch_size[0]*(rad+1)) &  (azimuth < (0 - patch_size[1]*(the - azimuth_cuts//2))) & (azimuth > (0 - patch_size[1]*(the + 1 - azimuth_cuts//2)))
-        #             mask = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (img_size), mode="area")
-        #             mask = mask*1.0
-        #             mask = mask.cuda()
-        #             count = torch.count_nonzero(mask)
-        #             num_features.append(count)
-        #             masks.append(mask) 
-        #     dim_in = max(num_features)
-        #     lin = nn.Linear(dim_in*in_chans, embed_dim)
-        #     self.lin = lin.cuda()
-        #     mlp.append(self.lin)
-        #     dim_out_in.append(dim_in*in_chans)
-
-        ############################
-        # self.masks = masks
-        # self.mlp = mlp
-        # self.dim_out_in = dim_out_in
-
-        ############### padding method multiple mlps ################# 
         self.mlp = nn.Linear(self.n_radius*self.n_azimuth*in_chans, embed_dim)
 
         if norm_layer is not None:
@@ -519,11 +488,6 @@ class PatchEmbed(nn.Module):
 
     def forward(self, x, dist):
         B, C, H, W = x.shape
-
-        # print(H, W, "image_shaep")
-        # print(self.img_size, "image_size")
-        # import pdb;pdb.set_trace()
-        # print(dist.transpose(1,0).shape)
 
         dist = dist.transpose(1,0)
         radius_buffer, azimuth_buffer = 0, 0
@@ -545,6 +509,7 @@ class PatchEmbed(nn.Module):
         y_ = y_/32
         out = torch.cat((x_, -(y_)), dim = 3)
         out = out.cuda()
+        # import pdb;pdb.set_trace()
         # print(out.shape)
 
         # FIXME look at relaxing size constraints
@@ -552,7 +517,7 @@ class PatchEmbed(nn.Module):
         #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
 
         ############################ projection layer ################
-        x_out = torch.empty(B, self.embed_dim, self.radius_cuts*2, self.azimuth_cuts//2).cuda(non_blocking=True)
+        x_out = torch.empty(B, self.embed_dim, self.radius_cuts, self.azimuth_cuts).cuda(non_blocking=True)
         tensor = nn.functional.grid_sample(x, out, align_corners = True).permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
 
         # tensor = x[:, :, self.x_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts], self.y_[i*self.radius_cuts:self.radius_cuts + i*self.radius_cuts]].permute(0,2,1,3).contiguous().view(-1, self.n_radius*self.n_azimuth*self.in_chans)
@@ -560,61 +525,15 @@ class PatchEmbed(nn.Module):
         out_ = out_.contiguous().view(B, self.radius_cuts*self.azimuth_cuts, -1)   # (B, 1024, embed_dim)
 
 
-        out_up  = out_[:, :self.radius_cuts*self.azimuth_cuts//2, :].reshape(B, self.azimuth_cuts//2, self.radius_cuts, self.embed_dim)
-        out_down  = out_[:,  self.radius_cuts*self.azimuth_cuts//2:, :].reshape(B,  self.azimuth_cuts//2, self.radius_cuts, self.embed_dim)
+        out_up  = out_.reshape(B, self.azimuth_cuts, self.radius_cuts, self.embed_dim)  ### check the output dimenssion properly
 
-        out_up = torch.flip(out_up, [1])  # (B,  az_div/2, rad_div, embed dim)
+        # out_up = torch.flip(out_up, [1])  # (B,  az_div/2, rad_div, embed dim)
         out_up = out_up.transpose(1, 3)
-        out_down = out_down.transpose(1,3)
+        # out_down = out_down.transpose(1,3)
         x_out[:, :, :self.radius_cuts, :] = out_up
 
-        x_out[:, :, self.radius_cuts:, :] = out_down
-
-            
-    
-
-###########################################################################################################
-        # for j in range(self.azimuth_cuts):
-        #     for i in range(self.radius_cuts)
-        # for i in range(self.radius_cuts):
-        #     for j in range(self.azimuth_cuts):
-        #         image = x*self.masks[m]
-        #         image = torch.flatten(image, start_dim = 1)
-        #         idx = torch.nonzero(image)
-        #         image = image[idx.transpose(0,1)[0], idx.transpose(0,1)[1]]
-        #         if image.shape[0]%B ==0:
-        #             image = image.reshape(B, image.shape[0]//B)
-        #         else:
-        #             pad = int(128 - image.shape[0]%128)
-        #             image = nn.functional.pad(image, (pad//2, pad - pad//2))
-        #             image = image.reshape(B, image.shape[0]//B)
-        #         if image.shape[1] < self.dim_out_in[i]:
-        #             pad = int(self.dim_out_in[i] - image.shape[1])
-        #             image  = nn.functional.pad(image, (pad//2, pad - pad//2))
-        #             image = image.cuda(non_blocking=True)
-        #         else:
-        #             image = image.cuda(non_blocking=True)
-                
-        #         out = self.mlp[i](image)
-                
-        #         # import pdb;pdb.set_trace()
-        #         if j < self.azimuth_cuts//2:
-        #             # print("up")
-        # #                 import pdb;pdb.set_trace()
-        #             x_[:, :, i, j] = out
-        #             # print(i, j)
-        #         else:
-        #             # print("down")
-        # #                     import pdb;pdb.set_trace()
-        #             x_[:, : , self.radius_cuts*2 - i - 1, self.azimuth_cuts//2 - (j - self.azimuth_cuts//2 ) -1] = out
-        #             # print( self.radius_cuts*2 - i - 1, self.azimuth_cuts//2 - (j - self.azimuth_cuts//2 ) -1)
-        #         m += 1
-        ###################################### end of projection layer ################
-        # print(x_.shape, x_.device)
-        # import pdb;pdb.set_trace()
         x = x_out.flatten(2).transpose(1, 2)  # B Ph*Pw C
-        # import pdb;pdb.set_trace()
-        # import pdb;pdb.set_trace()
+
         if self.norm is not None:
             x = self.norm(x)
         return x
@@ -771,3 +690,28 @@ class SwinTransformer(nn.Module):
         flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
         flops += self.num_features * self.num_classes
         return flops
+
+if __name__=='__main__':
+    model = SwinTransformer(img_size=64,
+                        radius_cuts=16, 
+                        azimuth_cuts=64,
+                        in_chans=3,
+                        num_classes=200,
+                        embed_dim=96,
+                        depths=[2, 2, 6, 2],
+                        num_heads=[3, 6, 12, 24],
+                        window_size=4,
+                        mlp_ratio=4,
+                        qkv_bias=True,
+                        qk_scale=None,
+                        drop_rate=0.0,
+                        drop_path_rate=0.1,
+                        ape=False,
+                        patch_norm=True,
+                        use_checkpoint=False)
+    model = model.cuda()
+    t = torch.ones(1, 3, 64, 64).cuda()
+    dist = torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(1, 4)).cuda()
+
+    m = model(t, dist)
+    import pdb;pdb.set_trace()
