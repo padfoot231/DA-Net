@@ -13,6 +13,8 @@ import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from utils import get_sample_params_from_subdiv, get_sample_locations
 
+pi = 3.141592653589793
+
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
@@ -31,6 +33,21 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
+def R(window_size, num_heads, radius, a_r, b_r, r_max):
+    radius = radius[:, :, None].repeat(1, 1, num_heads)
+    # A_r = torch.zeros(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads).cuda()
+    for i in range(1, 13):
+        A_r = a_r[i]*torch.cos(radius*2*pi*i/r_max) + b_r[i-1]*torch.sin(radius*2*pi*i/r_max)
+    return a_r[0] + A_r
+    
+    return A_r
+
+def phi(window_size, num_heads, azimuth, a_p, b_p):
+    azimuth = azimuth[:, :, None].repeat(1, 1, num_heads)
+    for i in range(1, 13):
+        A_phi = a_p[i]*torch.cos(azimuth*i) + b_p[i-1]*torch.sin(azimuth*i)
+    # import pdb;pdb.set_trace()
+    return A_phi + a_p[0]
 
 def window_partition(x, window_size):
     """
@@ -89,20 +106,31 @@ class WindowAttention(nn.Module):
         proj_drop (float, optional): Dropout ratio of output. Default: 0.0
     """
 
-    def __init__(self, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
+    def __init__(self, patch_size, input_resolution, dim, window_size, num_heads, qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0.):
         # import pdb;pdb.set_trace()
         super().__init__()
         # print("window_size", window_size)
         # import pdb;pdb.set_trace()
         self.dim = dim
+        self.input_resolution = input_resolution
+        self.patch_size = patch_size
         self.window_size = window_size  # Wh, Ww
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
+        H, W = input_resolution
 
         # define a parameter table of relative position bias
-        self.relative_position_bias_table = nn.Parameter(
-            torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
+        # self.relative_position_bias_table = nn.Parameter(
+        #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
+        self.a_p = nn.Parameter(
+            torch.zeros(13, num_heads))
+        self.b_p = nn.Parameter(
+            torch.zeros(12, num_heads))
+        self.a_r = nn.Parameter(
+            torch.zeros(13, num_heads))
+        self.b_r = nn.Parameter(
+            torch.zeros(12, num_heads))
 
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
@@ -111,17 +139,29 @@ class WindowAttention(nn.Module):
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
-        relative_coords[:, :, 0] += self.window_size[0] - 1  # shift to start from 0
-        relative_coords[:, :, 1] += self.window_size[1] - 1
-        relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
-        relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-        self.register_buffer("relative_position_index", relative_position_index)
+        # import pdb;pdb.set_trace()
+        radius = (relative_coords[:, :, 0] * patch_size[0]).cuda()
+        azimuth = (relative_coords[:, :, 1] * 2*np.pi/W).cuda()
+        r_max = patch_size[0]*H
+        self.r_max = r_max
+        self.radius = radius
+        self.azimuth = azimuth
+
+        # relative_coords[:, :, 0] += self.window_size[0] - 1  # shift to start from 0
+        # relative_coords[:, :, 1] += self.window_size[1] - 1
+        # relative_coords[:, :, 0] *= 2 * self.window_size[1] - 1
+        # relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
+        # self.register_buffer("relative_position_index", relative_position_index)
 
         self.qkv = nn.Linear(dim, dim * 3, bias=4)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        trunc_normal_(self.relative_position_bias_table, std=.02)
+        # trunc_normal_(self.relative_position_bias_table, std=.02)
+        trunc_normal_(self.a_p, std=.02)
+        trunc_normal_(self.a_r, std=.02)
+        trunc_normal_(self.b_p, std=.02)
+        trunc_normal_(self.b_r, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, mask=None):
@@ -139,10 +179,13 @@ class WindowAttention(nn.Module):
         q = q * self.scale
         attn = (q @ k.transpose(-2, -1))
 
-        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-            self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
-        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-        attn = attn + relative_position_bias.unsqueeze(0)
+        # relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
+        #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
+        # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p)
+        A_r = R(self.window_size, self.num_heads, self.radius, self.a_r, self.b_r, self.r_max)
+        # import pdb;pdb.set_trace()
+        attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) + A_r.transpose(1, 2).transpose(0, 1).unsqueeze(0)
 
         if mask is not None:
             nW = mask.shape[0]
@@ -195,13 +238,14 @@ class SwinTransformerBlock(nn.Module):
         norm_layer (nn.Module, optional): Normalization layer.  Default: nn.LayerNorm
     """
 
-    def __init__(self, dim, input_resolution, num_heads, window_size=7, shift_size=0,
+    def __init__(self, dim, patch_size, input_resolution, num_heads, window_size=7, shift_size=0,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, drop=0., attn_drop=0., drop_path=0.,
                  act_layer=nn.GELU, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
         self.num_heads = num_heads
+        self.patch_size = patch_size
         #self.num_mlps = radius_cuts # pass radius cuts as arguement 
         self.window_size = window_size
         self.shift_size = shift_size
@@ -211,11 +255,11 @@ class SwinTransformerBlock(nn.Module):
             self.shift_size = 0
             self.window_size = (min(self.input_resolution),self.input_resolution[1]) 
             self.attn = WindowAttention(
-            dim, window_size=self.window_size, num_heads=num_heads,
+            patch_size, input_resolution, dim, window_size=self.window_size, num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
         else:
             self.attn = WindowAttention(
-            dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
+            patch_size, input_resolution, dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
             assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
 
@@ -393,7 +437,7 @@ class BasicLayer(nn.Module):
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False.
     """
 
-    def __init__(self, dim, input_resolution, depth, num_heads, window_size,
+    def __init__(self, dim, input_resolution, patch_size, depth, num_heads, window_size,
                  mlp_ratio=4., qkv_bias=True, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., norm_layer=nn.LayerNorm, downsample=None, use_checkpoint=False):
 
@@ -402,10 +446,11 @@ class BasicLayer(nn.Module):
         self.input_resolution = input_resolution
         self.depth = depth
         self.use_checkpoint = use_checkpoint
+        self.patch_size = patch_size
 
         # build blocks
         self.blocks = nn.ModuleList([
-            SwinTransformerBlock(dim=dim, input_resolution=input_resolution,
+            SwinTransformerBlock(dim=dim, patch_size=patch_size, input_resolution=input_resolution,
                                  num_heads=num_heads, window_size=window_size,
                                  shift_size=0 if (i % 2 == 0) else window_size // 2,
                                  mlp_ratio=mlp_ratio,
@@ -467,9 +512,9 @@ class PatchEmbed(nn.Module):
         self.img_size = img_size
         self.radius = radius
         self.azimuth = azimuth
-        self.measurement = 1.0
+        # self.measurement = 1.0
         self.max_azimuth = np.pi*2
-        patch_size = [self.measurement/radius_cuts, self.max_azimuth/azimuth_cuts]
+        patch_size = [self.img_size[0]/(2*radius_cuts), self.max_azimuth/azimuth_cuts]
         # self.azimuth = 2*np.pi  comes from the cartesian script
 
         
@@ -613,6 +658,7 @@ class SwinTransformer(nn.Module):
         num_patches = self.patch_embed.num_patches
         patches_resolution = self.patch_embed.patches_resolution 
         self.patches_resolution = patches_resolution ### need to calculate FLOPS ( use later )
+        patch_size = self.patch_embed.patch_size
         # absolute position embedding
         if self.ape:
             self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
@@ -629,6 +675,7 @@ class SwinTransformer(nn.Module):
             layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
                                input_resolution=(patches_resolution[0] // (2 ** i_layer),
                                                  patches_resolution[1] // (2 ** i_layer)),
+                                patch_size = patch_size,
                                depth=depths[i_layer],
                                num_heads=num_heads[i_layer],
                                window_size=window_size,
