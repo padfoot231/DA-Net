@@ -424,7 +424,7 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, D=torch
         "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv
     }
 
-    return params
+    return params, D_s.reshape(subdiv[1], subdiv[0], D.shape[1]).T
 
 
 
@@ -503,10 +503,10 @@ if __name__=='__main__':
     # radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
     radius_buffer = azimuth_buffer = 0
 
-    D = torch.tensor(np.array([0.0, 0.0, 0.0, 0.0]).reshape(1,4).transpose(1,0)).cuda()
+    D = torch.tensor(np.array([0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5,0.5]).reshape(2,4).transpose(1,0)).cuda()
     # import pdb;pdb.set_trace()
 
-    params = get_sample_params_from_subdiv(
+    params, D_s = get_sample_params_from_subdiv(
         subdiv=subdiv,
         img_size=img_size,
         n_radius=n_radius,
@@ -516,7 +516,7 @@ if __name__=='__main__':
         azimuth_buffer=azimuth_buffer
     )
 
-    # import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
 
     sample_locations = get_sample_locations(**params)
     profiler.stop()

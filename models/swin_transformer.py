@@ -33,8 +33,13 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
-def R(window_size, num_heads, radius, a_r, b_r, r_max):
-    radius = radius[:, :, None].repeat(1, 1, num_heads)
+def R(window_size, num_heads, radius, D, a_r, b_r, r_max):
+    # import pdb;pdb.set_trace()
+    radius = radius[None, :, None, :].repeat(num_heads, 1, D.shape[0], 1) # num_heads, wh, num_win*B, ww
+    radius = D*radius
+
+    radius = radius.transpose(0,1).transpose(1,2).transpose(2,3).transpose(0,1)
+
     # A_r = torch.zeros(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads).cuda()
     for i in range(1, 13):
         A_r = a_r[i]*torch.cos(radius*2*pi*i/r_max) + b_r[i-1]*torch.sin(radius*2*pi*i/r_max)
@@ -49,7 +54,7 @@ def phi(window_size, num_heads, azimuth, a_p, b_p):
     # import pdb;pdb.set_trace()
     return A_phi + a_p[0]
 
-def window_partition(x, window_size):
+def window_partition(x, window_size, D_s):
     """
     Args:
         x: (B, H, W, C)
@@ -59,19 +64,23 @@ def window_partition(x, window_size):
         windows: (num_windows*B, window_size, window_size, C)
     """
     # print(x.shape)
-    # import pdb;pdb.set_trace()
     B, H, W, C = x.shape
+    # import pdb;pdb.set_trace()
     if type(window_size) is tuple:
         x = x.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1], C)
+        D_s = D_s.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1])
         windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size[0], window_size[1], C)
-        return windows
+        windows_d = D_s.permute(0, 1, 3, 2, 4).contiguous().view(-1, window_size[0], window_size[1])
+        return windows, windows_d
     else:
         x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
+        D_s = D_s.view(B, H // window_size, window_size, W // window_size, window_size)
         windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
-        return windows
+        windows_d = D_s.permute(0, 1, 3, 2, 4).contiguous().view(-1, window_size, window_size)
+        return windows, windows_d
 
 
-def window_reverse(windows, window_size, H, W):
+def window_reverse(windows, D_windows, window_size, H, W):
     """
     Args:
         windows: (num_windows*B, window_size, window_size, C)
@@ -85,11 +94,15 @@ def window_reverse(windows, window_size, H, W):
     if type(window_size) is tuple:
         B = int(windows.shape[0] / (H * W / window_size[0] / window_size[1]))
         x = windows.view(B, H // window_size[0], W // window_size[1], window_size[0], window_size[1], -1)
+        D_s = D_windows.view(B, H // window_size[0], W // window_size[1], window_size[0], window_size[1])
     else:
         B = int(windows.shape[0] / (H * W / window_size / window_size))
         x = windows.view(B, H // window_size, W // window_size, window_size, window_size, -1)
+        D_s = D_windows.view(B, H // window_size, W // window_size, window_size, window_size)
     x = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(B, H, W, -1)
-    return x
+    D_s = D_s.permute(0, 1, 3, 2, 4).contiguous().view(B, H, W)
+    # import pdb;pdb.set_trace()
+    return x, D_s
 
 
 class WindowAttention(nn.Module):
@@ -139,7 +152,7 @@ class WindowAttention(nn.Module):
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
-        radius = (relative_coords[:, :, 0] * patch_size[0]).cuda()
+        radius = (relative_coords[:, :, 0]).cuda()
         azimuth = (relative_coords[:, :, 1] * 2*np.pi/W).cuda()
         r_max = patch_size[0]*H
         # print("patch_size", patch_size[0], "azimuth", 2*np.pi/W, "r_max", r_max)
@@ -164,7 +177,7 @@ class WindowAttention(nn.Module):
         trunc_normal_(self.b_r, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, D, mask=None):
         """
         Args:
             x: input features with shape of (num_windows*B, N, C)
@@ -173,6 +186,7 @@ class WindowAttention(nn.Module):
         """
         
         B_, N, C = x.shape
+        # import pdb;pdb.set_trace()
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
 
@@ -184,9 +198,8 @@ class WindowAttention(nn.Module):
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
 
         A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p)
-        A_r = R(self.window_size, self.num_heads, self.radius, self.a_r, self.b_r, self.r_max)
-        # import pdb;pdb.set_trace()
-        attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) + A_r.transpose(1, 2).transpose(0, 1).unsqueeze(0)
+        A_r = R(self.window_size, self.num_heads, self.radius, D, self.a_r, self.b_r, self.r_max)
+        attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) + A_r.transpose(2, 3).transpose(1, 2)
 
         if mask is not None:
             nW = mask.shape[0]
@@ -276,6 +289,7 @@ class SwinTransformerBlock(nn.Module):
             # calculate attention mask for SW-MSA
             H, W = self.input_resolution
             img_mask = torch.zeros((1, H, W, 1))  # 1 H W 1
+            D_s = torch.zeros((1, H, W))  # 1 H W 1
             h_slices = (slice(0, -self.window_size),
                         slice(-self.window_size, -self.shift_size),
                         slice(-self.shift_size, None))
@@ -288,8 +302,9 @@ class SwinTransformerBlock(nn.Module):
                     img_mask[:, h, w, :] = cnt
                     cnt += 1
 
-            mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
+            mask_windows, D_s_windows = window_partition(img_mask, self.window_size, D_s)  # nW, window_size, window_size, 1
             mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
+            D_s_windows = D_s_windows.view(-1, self.window_size * self.window_size)
             attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
             attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
         else:
@@ -297,7 +312,9 @@ class SwinTransformerBlock(nn.Module):
 
         self.register_buffer("attn_mask", attn_mask)
 
-    def forward(self, x):
+    def forward(self, x, D_s):
+        # print("SwinTransformerBlock")
+        # import pdb;pdb.set_trace()
         H, W = self.input_resolution
         B, L, C = x.shape
         assert L == H * W, "input feature has wrong size"
@@ -313,25 +330,26 @@ class SwinTransformerBlock(nn.Module):
             shifted_x = x
 
         # partition windows
-        x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
+        x_windows, D_windows = window_partition(shifted_x, self.window_size, D_s)  # nW*B, window_size, window_size, C
         if type(self.window_size) is tuple:
-            x_windows = x_windows.view(-1, self.window_size[0] * self.window_size[1], C)  # nW*B, window_size*window_size, C
+            x_windows = x_windows.view(-1, self.window_size[0] * self.window_size[1], C)
+            D_windows = D_windows.view(-1, self.window_size[0] * self.window_size[1])  # nW*B, window_size*window_size, C
 
             # W-MSA/SW-MSA
-            attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
+            attn_windows = self.attn(x_windows, D_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
 
             # merge windows
             attn_windows = attn_windows.view(-1, self.window_size[0], self.window_size[1], C)
         else:
             x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # nW*B, window_size*window_size, C
-
+            D_windows = D_windows.view(-1, self.window_size * self.window_size)
             # W-MSA/SW-MSA
-            attn_windows = self.attn(x_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
+            attn_windows = self.attn(x_windows, D_windows, mask=self.attn_mask)  # nW*B, window_size*window_size, C
 
             # merge windows
             attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
 
-        shifted_x = window_reverse(attn_windows, self.window_size, H, W)  # B H' W' C
+        shifted_x, D_s = window_reverse(attn_windows, D_windows, self.window_size, H, W)  # B H' W' C
 
         # reverse cyclic shift
         if self.shift_size > 0:
@@ -344,7 +362,7 @@ class SwinTransformerBlock(nn.Module):
         # FFN
         x = x + self.drop_path(self.mlp(self.norm2(x)))
 
-        return x
+        return x, D_s
 
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, num_heads={self.num_heads}, " \
@@ -385,10 +403,12 @@ class PatchMerging(nn.Module):
         self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
         self.norm = norm_layer(4 * dim)
 
-    def forward(self, x):
+    def forward(self, x, D):
         """
         x: B, H*W, C
+        D:, B, H, W
         """
+        # import pdb;pdb.set_trace()
         H, W = self.input_resolution
         B, L, C = x.shape
         assert L == H * W, "input feature has wrong size"
@@ -400,13 +420,21 @@ class PatchMerging(nn.Module):
         x1 = x[:, 1::2, 0::2, :]  # B H/2 W/2 C
         x2 = x[:, 0::2, 1::2, :]  # B H/2 W/2 C
         x3 = x[:, 1::2, 1::2, :]  # B H/2 W/2 C
-        x = torch.cat([x0, x1, x2, x3], -1)  # B H/2 W/2 4*C
+        x = torch.cat([x0, x1, x2, x3], -1)  # B H/2 W/2 4*
+
         x = x.view(B, -1, 4 * C)  # B H/2*W/2 4*C 
 
         x = self.norm(x)
         x = self.reduction(x)
+        D = D/2
+        D0 = D[:, 0::2, 0::2, None]  # B H/2 W/2 C
+        D1 = D[:, 1::2, 0::2, None]  # B H/2 W/2 C
+        D2 = D[:, 0::2, 1::2, None]  # B H/2 W/2 C
+        D3 = D[:, 1::2, 1::2, None]  # B H/2 W/2 C
+        D = torch.cat([D0, D1, D2, D3], -1)  # B H/2 W/2 4*C
+        D = torch.mean(D, -1)
 
-        return x
+        return x, D
 
     def extra_repr(self) -> str:
         return f"input_resolution={self.input_resolution}, dim={self.dim}"
@@ -467,15 +495,17 @@ class BasicLayer(nn.Module):
         else:
             self.downsample = None
 
-    def forward(self, x):
+    def forward(self, x, D_s):
+        # print("basic layer")
+        # import pdb;pdb.set_trace()
         for blk in self.blocks:
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x)
             else:
-                x = blk(x)
+                x, D = blk(x, D_s)
         if self.downsample is not None:
-            x = self.downsample(x)
-        return x
+            x, D = self.downsample(x, D)
+        return x, D
 
     def extra_repr(self) -> str:
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
@@ -541,7 +571,7 @@ class PatchEmbed(nn.Module):
 
         dist = dist.transpose(1,0)
         radius_buffer, azimuth_buffer = 0, 0
-        params = get_sample_params_from_subdiv(
+        params, D_s = get_sample_params_from_subdiv(
             subdiv=self.subdiv,
             img_size=self.img_size,
             D = dist, 
@@ -550,7 +580,7 @@ class PatchEmbed(nn.Module):
             radius_buffer=radius_buffer,
             azimuth_buffer=azimuth_buffer)
 
-
+        # import pdb;pdb.set_trace()
         sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
         B, n_p, n_s = sample_locations[0].shape
         x_ = sample_locations[0].reshape(B, n_p, n_s, 1).float()
@@ -586,7 +616,7 @@ class PatchEmbed(nn.Module):
 
         if self.norm is not None:
             x = self.norm(x)
-        return x
+        return x, D_s
 
     def flops(self):
         Ho, Wo = self.patches_resolution
@@ -714,7 +744,7 @@ class SwinTransformer(nn.Module):
 
     def forward_features(self, x, dist):
         # print(x.shape)
-        x = self.patch_embed(x, dist)
+        x, D_s = self.patch_embed(x, dist)
         # print(x.shape)
         # import pdb;pdb.set_trace()
         if self.ape:
@@ -722,7 +752,7 @@ class SwinTransformer(nn.Module):
         x = self.pos_drop(x)
 
         for layer in self.layers:
-            x = layer(x)
+            x, D_s = layer(x, D_s)
 
         x = self.norm(x)  # B L C
         x = self.avgpool(x.transpose(1, 2))  # B C 1
