@@ -139,10 +139,10 @@ class WindowAttention(nn.Module):
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
-        # import pdb;pdb.set_trace()
         radius = (relative_coords[:, :, 0] * patch_size[0]).cuda()
         azimuth = (relative_coords[:, :, 1] * 2*np.pi/W).cuda()
         r_max = patch_size[0]*H
+        # print("patch_size", patch_size[0], "azimuth", 2*np.pi/W, "r_max", r_max)
         self.r_max = r_max
         self.radius = radius
         self.azimuth = azimuth
@@ -182,6 +182,7 @@ class WindowAttention(nn.Module):
         # relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
         #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+
         A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p)
         A_r = R(self.window_size, self.num_heads, self.radius, self.a_r, self.b_r, self.r_max)
         # import pdb;pdb.set_trace()

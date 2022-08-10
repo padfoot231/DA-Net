@@ -53,7 +53,7 @@ class M_distort(data.Dataset):
         # self.n_azimuth = 15
         self.img_size = img_size
 
-        with open('/home-local2/akath.extra.nobkp/classes_custom.pkl', 'rb') as f:
+        with open('/home-local2/akath.extra.nobkp/first_classes.pkl', 'rb') as f:
             classes = pkl.load(f)
         
         self.classes = classes
@@ -61,12 +61,12 @@ class M_distort(data.Dataset):
         #     distortion  = pkl.load(f)
         # lst = []
         if task == 'train':
-            with open(self.data_path + '/train/train_custom.pkl', 'rb') as f:
+            with open(self.data_path + '/train/train_j.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/train_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         elif task == 'val':
-            with open(self.data_path + '/val/val_custom.pkl', 'rb') as f:
+            with open(self.data_path + '/val/val_j.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/val_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
