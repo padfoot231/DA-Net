@@ -147,7 +147,7 @@ class M_distort(data.Dataset):
         images = Image.open(self.data_path + '/' + self.data[index])
 
         points = random_direction_normal(4, 1)
-        D = random_magnitude_uniform(points, high=10).T
+        D = random_magnitude_uniform(points, high=50).T
         # images.save("test.png")
         images = distort_image(images, D[0])
         # images.save("test_dis.png")
