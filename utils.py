@@ -314,6 +314,7 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
         tuple[ndarray, ndarray]: lists of x and y coordinates of the sample locations
     """
     #Compute center of the image to shift the samples later
+    import pdb;pdb.set_trace()
     center = [img_size[0]/2, img_size[1]/2]
     if img_size[0] % 2 == 0:
         center[0] -= 0.5
@@ -422,6 +423,7 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, img_size, D=torch
         'alpha': alpha, "phi": phi, "dmin": D_min, "ds": D_s, "n_azimuth": n_azimuth, "n_radius": n_radius,
         "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv
     }
+    # import pdb;pdb.set_trace()
 
     return params, D_s.reshape(subdiv[1], subdiv[0], D.shape[1]).T
 
@@ -492,20 +494,20 @@ if __name__=='__main__':
     # colors = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628']
 
     # subdiv = 3
-    radius_subdiv = 16
-    azimuth_subdiv = 64
+    radius_subdiv = 2
+    azimuth_subdiv = 8
     subdiv = (radius_subdiv, azimuth_subdiv)
     # subdiv = 3
-    n_radius = 20
-    n_azimuth = 20
+    n_radius = 8
+    n_azimuth = 8
     img_size = (64, 64)
     # radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
     radius_buffer = azimuth_buffer = 0
 
-    D = torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(1,4).transpose(1,0)).cuda()
+    D = torch.tensor(np.array([0.0, 0.0, 0.0, 0.0]).reshape(1,4).transpose(1,0)).cuda()
     # import pdb;pdb.set_trace()
 
-    params = get_sample_params_from_subdiv(
+    params, D_s = get_sample_params_from_subdiv(
         subdiv=subdiv,
         img_size=img_size,
         n_radius=n_radius,
