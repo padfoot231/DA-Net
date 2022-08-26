@@ -30,7 +30,7 @@ from logger import create_logger
 from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScalerWithGradNormCount, auto_resume_helper, \
     reduce_tensor
 
-wandb.init(project="radial-transformer-distorted")
+wandb.init(project="Distortion", entity='padfoot')
 # run_name = wandb.run.name
 def parse_option():
     parser = argparse.ArgumentParser('Swin Transformer training and evaluation script', add_help=False)
@@ -124,6 +124,7 @@ def main(config):
         else:
             logger.info(f'no checkpoint found in {config.OUTPUT}, ignoring auto resume')
 
+
     if config.MODEL.RESUME:
         max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, loss_scaler, logger)
         acc1, acc5, loss = validate(config, data_loader_val, model)
@@ -152,6 +153,7 @@ def main(config):
                             logger)
 
         acc1, acc5, loss = validate(config, data_loader_val, model)
+        # acc1_test, acc5_test, loss_test = test(config, data_loader_test, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%")
         max_accuracy = max(max_accuracy, acc1)
         logger.info(f'Max accuracy: {max_accuracy:.2f}%')
@@ -282,6 +284,63 @@ def validate(config, data_loader, model):
 
     return acc1_meter.avg, acc5_meter.avg, loss_meter.avg
 
+
+@torch.no_grad()
+def test(config, data_loader, model):
+    criterion = torch.nn.CrossEntropyLoss()
+    model.eval()
+
+    batch_time = AverageMeter()
+    loss_meter_test = AverageMeter()
+    acc1_meter_test = AverageMeter()
+    acc5_meter_test = AverageMeter()
+
+    end = time.time()
+    running_loss_test = 0
+    running_acc1 = 0
+    running_acc5 = 0
+    for idx, (images, target, dist) in enumerate(data_loader):
+        images = images.cuda(non_blocking=True)
+        target = target.cuda(non_blocking=True)
+
+        # compute output
+        with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
+            output = model(images, dist)
+
+        # measure accuracy and record loss
+        loss_test = criterion(output, target)
+        acc1_test, acc5_test = accuracy(output, target, topk=(1, 5))
+
+        acc1_test = reduce_tensor(acc1_test)
+        acc5_test = reduce_tensor(acc5_test)
+        loss_test = reduce_tensor(loss_test)
+
+        loss_meter_test.update(loss_test.item(), target.size(0))
+        acc1_meter_test.update(acc1_test.item(), target.size(0))
+        acc5_meter_test.update(acc5_test.item(), target.size(0))
+        # wandb.log({"loss_val" : loss.item(), 
+        #             "Acc1" : acc1, 
+        #             "Acc5" : acc5})
+
+        # measure elapsed time
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        if idx % config.PRINT_FREQ == 0:
+            memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+            logger.info(
+                f'Test: [{idx}/{len(data_loader)}]\t'
+                f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                f'Loss {loss_meter_test.val:.4f} ({loss_meter_test.avg:.4f})\t'
+                f'Acc@1 {acc1_meter_test.val:.3f} ({acc1_meter_test.avg:.3f})\t'
+                f'Acc@5 {acc5_meter_test.val:.3f} ({acc5_meter_test.avg:.3f})\t'
+                f'Mem {memory_used:.0f}MB')
+    logger.info(f' * Acc@1 {acc1_meter_test.avg:.3f} Acc@5 {acc5_meter_test.avg:.3f}')
+    wandb.log({"loss_test_avg" :loss_meter_test.avg, 
+            "Acc1_test_avg" : acc1_meter_test.avg, 
+            "Acc5_test_avg" :  acc5_meter_test.avg})
+
+    return acc1_meter_test.avg, acc5_meter_test.avg, loss_meter_test.avg
 
 
 @torch.no_grad()

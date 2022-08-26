@@ -53,7 +53,7 @@ class M_distort(data.Dataset):
         # self.n_azimuth = 15
         self.img_size = img_size
 
-        with open('/home-local2/akath.extra.nobkp/second_classes.pkl', 'rb') as f:
+        with open(self.data_path + '/classes.pkl', 'rb') as f:
             classes = pkl.load(f)
         
         self.classes = classes
@@ -61,16 +61,23 @@ class M_distort(data.Dataset):
         #     distortion  = pkl.load(f)
         # lst = []
         if task == 'train':
-            with open(self.data_path + '/train/train_ju.pkl', 'rb') as f:
+            with open(self.data_path + '/train/train.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/train_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         elif task == 'val':
-            with open(self.data_path + '/val/val_ju.pkl', 'rb') as f:
+            with open(self.data_path + '/val/val.pkl', 'rb') as f:
+                data = pkl.load(f)
+        elif task == 'test':
+            with open(self.data_path + '/test/test.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/val_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         
+
+        with open(self.data_path + '/dist_params.pkl', 'rb') as f:
+            test_dist = pkl.load(f)
+
 
         # classes = list(data.keys())
 
@@ -87,7 +94,8 @@ class M_distort(data.Dataset):
         #     for j in range(len(data[classes[i]])):
         #         data_img[idx] = (data[classes[i]][j], i, data[classes[i]][j].split('/')[-2])
         #         idx = idx+1
-        
+        self.test_dist = test_dist
+        self.task = task 
         # self.data_img = data_img
         self.data = data
         self.transform = transform
@@ -146,10 +154,14 @@ class M_distort(data.Dataset):
         # print("end_sample_location")
         images = Image.open(self.data_path + '/' + self.data[index])
 
-        points = random_direction_normal(4, 1)
-        D = random_magnitude_uniform(points, high=50).T
+        if self.task == 'train' or self.task=='val':
+            points = random_direction_normal(4, 1)
+            D = random_magnitude_uniform(points, high=50).T
+            D = D[0]
+        elif self.task == 'test':
+            D = self.test_dist[self.data[index]]
         # images.save("test.png")
-        images = distort_image(images, D[0])
+        images = distort_image(images, D)
         # images.save("test_dis.png")
 
 
@@ -197,15 +209,15 @@ class M_distort(data.Dataset):
         # current_time = now.strftime("%H:%M:%S")
         # print("Current Time =", current_time)
         # print(index)
-        return images, target, D[0]
+        return images, target, D
 
     def __len__(self):
         return len(self.data)
 
 if __name__=='__main__':
 
-    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_full', task='train')
-    # import pdb;pdb.set_trace()
+    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_2010', task='train')
+    import pdb;pdb.set_trace()
     m[1]
     
 

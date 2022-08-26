@@ -314,7 +314,7 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
         tuple[ndarray, ndarray]: lists of x and y coordinates of the sample locations
     """
     #Compute center of the image to shift the samples later
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     center = [img_size[0]/2, img_size[1]/2]
     if img_size[0] % 2 == 0:
         center[0] -= 0.5
