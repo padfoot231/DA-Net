@@ -278,9 +278,9 @@ def validate(config, data_loader, model):
                 f'Acc@5 {acc5_meter.val:.3f} ({acc5_meter.avg:.3f})\t'
                 f'Mem {memory_used:.0f}MB')
     logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
-    wandb.log({"loss_val_avg" :loss_meter.avg, 
-            "Acc1_avg" : acc1_meter.avg, 
-            "Acc5_avg" :  acc5_meter.avg})
+    wandb.log({"loss_val" :loss_meter.avg, 
+            "Acc1" : acc1_meter.avg, 
+            "Acc5" :  acc5_meter.avg})
 
     return acc1_meter.avg, acc5_meter.avg, loss_meter.avg
 

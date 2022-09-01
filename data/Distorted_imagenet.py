@@ -61,15 +61,15 @@ class M_distort(data.Dataset):
         #     distortion  = pkl.load(f)
         # lst = []
         if task == 'train':
-            with open(self.data_path + '/train/train.pkl', 'rb') as f:
+            with open(self.data_path + '/train/train_20.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/train_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         elif task == 'val':
-            with open(self.data_path + '/val/val.pkl', 'rb') as f:
+            with open(self.data_path + '/val/val_20.pkl', 'rb') as f:
                 data = pkl.load(f)
         elif task == 'test':
-            with open(self.data_path + '/test/test.pkl', 'rb') as f:
+            with open(self.data_path + '/test/test_20.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/val_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
@@ -161,6 +161,7 @@ class M_distort(data.Dataset):
         elif self.task == 'test':
             D = self.test_dist[self.data[index]]
         # images.save("test.png")
+        # D = np.array([0.0, 0.0, 0.0, 0.0])
         images = distort_image(images, D)
         # images.save("test_dis.png")
 
