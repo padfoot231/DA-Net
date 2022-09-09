@@ -61,15 +61,15 @@ class M_distort(data.Dataset):
         #     distortion  = pkl.load(f)
         # lst = []
         if task == 'train':
-            with open(self.data_path + '/train/train_20.pkl', 'rb') as f:
+            with open(self.data_path + '/train/train.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/train_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         elif task == 'val':
-            with open(self.data_path + '/val/val_20.pkl', 'rb') as f:
+            with open(self.data_path + '/val/val.pkl', 'rb') as f:
                 data = pkl.load(f)
         elif task == 'test':
-            with open(self.data_path + '/test/test_20.pkl', 'rb') as f:
+            with open(self.data_path + '/test/test.pkl', 'rb') as f:
                 data = pkl.load(f)
             # with open(self.data_path + '/val_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
@@ -154,10 +154,14 @@ class M_distort(data.Dataset):
         # print("end_sample_location")
         images = Image.open(self.data_path + '/' + self.data[index])
 
-        if self.task == 'train' or self.task=='val':
+        if self.task == 'train':
+            # points = random_direction_normal(4, 1)
+            # D = random_magnitude_uniform(points, high=50).T
+            D = np.array([33.21885116,  5.86361501, 17.73762952, 13.39959067]) + np.random.rand(4)*2
+        elif self.task=='val':
             points = random_direction_normal(4, 1)
             D = random_magnitude_uniform(points, high=50).T
-            D = D[0]
+            D = np.array(D)
         elif self.task == 'test':
             D = self.test_dist[self.data[index]]
         # images.save("test.png")

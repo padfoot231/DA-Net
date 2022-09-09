@@ -35,24 +35,28 @@ class Mlp(nn.Module):
 
 def R(window_size, num_heads, radius, D, a_r, b_r, r_max):
     # import pdb;pdb.set_trace()
+    a_r = a_r[radius.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
+    b_r = b_r[radius.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
     radius = radius[None, :, None, :].repeat(num_heads, 1, D.shape[0], 1) # num_heads, wh, num_win*B, ww
     radius = D*radius
 
     radius = radius.transpose(0,1).transpose(1,2).transpose(2,3).transpose(0,1)
 
     # A_r = torch.zeros(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads).cuda()
-    for i in range(1, 13):
-        A_r = a_r[i]*torch.cos(radius*2*pi*i/r_max) + b_r[i-1]*torch.sin(radius*2*pi*i/r_max)
-    return a_r[0] + A_r
+    A_r = a_r*torch.cos(radius*2*pi/r_max) + b_r*torch.sin(radius*2*pi/r_max)
     
     return A_r
 
-def phi(window_size, num_heads, azimuth, a_p, b_p):
-    azimuth = azimuth[:, :, None].repeat(1, 1, num_heads)
-    for i in range(1, 13):
-        A_phi = a_p[i]*torch.cos(azimuth*i) + b_p[i-1]*torch.sin(azimuth*i)
+def phi(window_size, num_heads, azimuth, a_p, b_p, W):
     # import pdb;pdb.set_trace()
-    return A_phi + a_p[0]
+    a_p = a_p[azimuth.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
+    b_p = b_p[azimuth.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
+    azimuth = azimuth*2*np.pi/W
+    azimuth = azimuth[:, :, None].repeat(1, 1, num_heads)
+
+    A_phi = a_p*torch.cos(azimuth) + b_p*torch.sin(azimuth)
+    # import pdb;pdb.set_trace()
+    return A_phi 
 
 def window_partition(x, window_size, D_s):
     """
@@ -132,18 +136,19 @@ class WindowAttention(nn.Module):
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
         H, W = input_resolution
+        # print(H, W)
 
         # define a parameter table of relative position bias
         # self.relative_position_bias_table = nn.Parameter(
         #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
         self.a_p = nn.Parameter(
-            torch.zeros(13, num_heads))
+            torch.zeros(window_size[1], num_heads))
         self.b_p = nn.Parameter(
-            torch.zeros(12, num_heads))
+            torch.zeros(window_size[1], num_heads))
         self.a_r = nn.Parameter(
-            torch.zeros(13, num_heads))
+            torch.zeros((2 * window_size[0] - 1), num_heads))
         self.b_r = nn.Parameter(
-            torch.zeros(12, num_heads))
+            torch.zeros((2 * window_size[0] - 1), num_heads))
 
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
@@ -153,8 +158,9 @@ class WindowAttention(nn.Module):
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
         radius = (relative_coords[:, :, 0]).cuda()
-        azimuth = (relative_coords[:, :, 1] * 2*np.pi/W).cuda()
+        azimuth = (relative_coords[:, :, 1]).cuda()
         r_max = patch_size[0]*H
+        # import pdb;pdb.set_trace()
         # print("patch_size", patch_size[0], "azimuth", 2*np.pi/W, "r_max", r_max)
         self.r_max = r_max
         self.radius = radius
@@ -186,6 +192,7 @@ class WindowAttention(nn.Module):
         """
         
         B_, N, C = x.shape
+        print(self.input_resolution)
         # import pdb;pdb.set_trace()
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
@@ -196,9 +203,10 @@ class WindowAttention(nn.Module):
         # relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
         #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-
-        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p)
+        # import pdb;pdb.set_trace()
+        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1])
         A_r = R(self.window_size, self.num_heads, self.radius, D, self.a_r, self.b_r, self.r_max)
+        import pdb;pdb.set_trace()
         attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) + A_r.transpose(2, 3).transpose(1, 2)
 
         if mask is not None:
@@ -681,7 +689,7 @@ class SwinTransformer(nn.Module):
         y = cartesian[1]
         x = cartesian[0]
         theta = torch.atan2(cartesian[1], cartesian[0])
-        print(radius_cuts)
+        print("single p", radius_cuts)
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
             img_size=img_size, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
@@ -781,7 +789,7 @@ if __name__=='__main__':
                         num_classes=200,
                         embed_dim=96,
                         depths=[2, 2, 6, 2],
-                        num_heads=[3, 6, 12, 24],
+                        num_heads=[3, 6, 12, 1],
                         window_size=4,
                         mlp_ratio=4,
                         qkv_bias=True,
