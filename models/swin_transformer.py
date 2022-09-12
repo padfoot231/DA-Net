@@ -141,10 +141,17 @@ class WindowAttention(nn.Module):
         # define a parameter table of relative position bias
         # self.relative_position_bias_table = nn.Parameter(
         #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
-        self.a_p = nn.Parameter(
-            torch.zeros(window_size[1], num_heads))
-        self.b_p = nn.Parameter(
-            torch.zeros(window_size[1], num_heads))
+        if input_resolution == window_size:
+            # import pdb;pdb.set_trace()
+            self.a_p = nn.Parameter(
+                torch.zeros(window_size[1], num_heads))
+            self.b_p = nn.Parameter(
+                torch.zeros(window_size[1], num_heads))
+        else:
+            self.a_p = nn.Parameter(
+                torch.zeros((2 * window_size[1] - 1), num_heads))
+            self.b_p = nn.Parameter(
+                torch.zeros((2 * window_size[1] - 1), num_heads))
         self.a_r = nn.Parameter(
             torch.zeros((2 * window_size[0] - 1), num_heads))
         self.b_r = nn.Parameter(
@@ -192,7 +199,7 @@ class WindowAttention(nn.Module):
         """
         
         B_, N, C = x.shape
-        print(self.input_resolution)
+        # print(self.input_resolution)
         # import pdb;pdb.set_trace()
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
@@ -206,7 +213,7 @@ class WindowAttention(nn.Module):
         # import pdb;pdb.set_trace()
         A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1])
         A_r = R(self.window_size, self.num_heads, self.radius, D, self.a_r, self.b_r, self.r_max)
-        import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
         attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) + A_r.transpose(2, 3).transpose(1, 2)
 
         if mask is not None:
@@ -689,7 +696,7 @@ class SwinTransformer(nn.Module):
         y = cartesian[1]
         x = cartesian[0]
         theta = torch.atan2(cartesian[1], cartesian[0])
-        print("single p", radius_cuts)
+        print("single p_", radius_cuts)
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
             img_size=img_size, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,

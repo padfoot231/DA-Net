@@ -155,15 +155,22 @@ class M_distort(data.Dataset):
         images = Image.open(self.data_path + '/' + self.data[index])
 
         if self.task == 'train':
-            # points = random_direction_normal(4, 1)
-            # D = random_magnitude_uniform(points, high=50).T
-            D = np.array([33.21885116,  5.86361501, 17.73762952, 13.39959067]) + np.random.rand(4)*2
-        elif self.task=='val':
+            # print("train")
             points = random_direction_normal(4, 1)
-            D = random_magnitude_uniform(points, high=50).T
-            D = np.array(D)
+            D = random_magnitude_uniform(points, high=10).T
+            # print("one_distortion")
+            D = np.array([33.21885116,  5.86361501, 17.73762952, 13.39959067]) + D[0]
+        elif self.task=='val':
+            # print("val")
+            points = random_direction_normal(4, 1)
+            D = random_magnitude_uniform(points, high=10).T
+            D = np.array([33.21885116,  5.86361501, 17.73762952, 13.39959067]) + D[0]
         elif self.task == 'test':
             D = self.test_dist[self.data[index]]
+            # points = random_direction_normal(4, 1)
+            # D = random_magnitude_uniform(points, high=10).T
+            # D = D[0]
+            # print("testing", D)
         # images.save("test.png")
         # D = np.array([0.0, 0.0, 0.0, 0.0])
         images = distort_image(images, D)
