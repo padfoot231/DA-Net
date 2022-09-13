@@ -33,30 +33,34 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
-def R(window_size, num_heads, radius, D, a_r, b_r, r_max):
+def R(window_size, num_heads, radius, D, a_r, b_r, r_max, P):
     # import pdb;pdb.set_trace()
-    a_r = a_r[radius.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
-    b_r = b_r[radius.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
-    radius = radius[None, :, None, :].repeat(num_heads, 1, D.shape[0], 1) # num_heads, wh, num_win*B, ww
-    radius = D*radius
+    # P = 4
+    D = D.unsqueeze(1).unsqueeze(3)
+    D = D.repeat(1, 16, 1, num_heads)
+    radius = D[:, 0, :, :].unsqueeze(2)
+    # radius = radius[None, :, None, :].repeat(num_heads, 1, D.shape[0], 1) # num_heads, wh, num_win*B, ww
+    radius = D - radius
+    r_max, b = torch.max(radius, dim=1)
+    r_max = r_max[:, 0, 0].unsqueeze(1).unsqueeze(2).unsqueeze(3)
+    # radius = radius.transpose(0,1).transpose(1,2).transpose(2,3).transpose(0,1)
+    A_r = 0
+    for i in range(1,P+1):
+        A_r = a_r[i]*torch.cos((radius*2*pi*i)/(r_max+0.0000000001)) + b_r[i-1]*torch.sin((radius*2*pi*i)/(r_max+0.0000000001))
 
-    radius = radius.transpose(0,1).transpose(1,2).transpose(2,3).transpose(0,1)
-
-    # A_r = torch.zeros(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads).cuda()
-    A_r = a_r*torch.cos(radius*2*pi/r_max) + b_r*torch.sin(radius*2*pi/r_max)
-    
-    return A_r
-
-def phi(window_size, num_heads, azimuth, a_p, b_p, W):
     # import pdb;pdb.set_trace()
-    a_p = a_p[azimuth.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
-    b_p = b_p[azimuth.view(-1)].reshape(window_size[0]*window_size[1], window_size[0]*window_size[1], num_heads)
+    return A_r//P + a_r[0]
+
+def phi(window_size, num_heads, azimuth, a_p, b_p, W, P):
+    # import pdb;pdb.set_trace()
     azimuth = azimuth*2*np.pi/W
     azimuth = azimuth[:, :, None].repeat(1, 1, num_heads)
-
-    A_phi = a_p*torch.cos(azimuth) + b_p*torch.sin(azimuth)
+    # P = 4
+    A_phi = 0
+    for i in range(1, P+1):
+        A_phi = a_p[i]*torch.cos(i*azimuth) + b_p[i-1]*torch.sin(i*azimuth)
     # import pdb;pdb.set_trace()
-    return A_phi 
+    return A_phi//P + a_p[0] 
 
 def window_partition(x, window_size, D_s):
     """
@@ -137,25 +141,20 @@ class WindowAttention(nn.Module):
         self.scale = qk_scale or head_dim ** -0.5
         H, W = input_resolution
         # print(H, W)
-
+        num_windows = (H//window_size[0], W//window_size[1])
+        self.P = 4  ## frequency
         # define a parameter table of relative position bias
         # self.relative_position_bias_table = nn.Parameter(
         #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
-        if input_resolution == window_size:
-            # import pdb;pdb.set_trace()
-            self.a_p = nn.Parameter(
-                torch.zeros(window_size[1], num_heads))
-            self.b_p = nn.Parameter(
-                torch.zeros(window_size[1], num_heads))
-        else:
-            self.a_p = nn.Parameter(
-                torch.zeros((2 * window_size[1] - 1), num_heads))
-            self.b_p = nn.Parameter(
-                torch.zeros((2 * window_size[1] - 1), num_heads))
-        self.a_r = nn.Parameter(
-            torch.zeros((2 * window_size[0] - 1), num_heads))
-        self.b_r = nn.Parameter(
-            torch.zeros((2 * window_size[0] - 1), num_heads))
+        # # else:
+        self.a_p = nn.Parameter(
+            torch.zeros(self.P + 1, num_heads))
+        self.b_p = nn.Parameter(
+            torch.zeros(self.P, num_heads))
+        # self.a_r = nn.Parameter(
+        #     torch.zeros(self.P + 1, num_heads))
+        # self.b_r = nn.Parameter(
+        #     torch.zeros(self.P, num_heads))
 
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
@@ -185,9 +184,9 @@ class WindowAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         # trunc_normal_(self.relative_position_bias_table, std=.02)
         trunc_normal_(self.a_p, std=.02)
-        trunc_normal_(self.a_r, std=.02)
+        # trunc_normal_(self.a_r, std=.02)
         trunc_normal_(self.b_p, std=.02)
-        trunc_normal_(self.b_r, std=.02)
+        # trunc_normal_(self.b_r, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, D, mask=None):
@@ -211,11 +210,11 @@ class WindowAttention(nn.Module):
         #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
         # import pdb;pdb.set_trace()
-        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1])
-        A_r = R(self.window_size, self.num_heads, self.radius, D, self.a_r, self.b_r, self.r_max)
+        # A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1], self.P)
+        A_r = R(self.window_size, self.num_heads, self.radius, D, self.a_r, self.b_r, self.r_max, self.P)
         # import pdb;pdb.set_trace()
-        attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) + A_r.transpose(2, 3).transpose(1, 2)
-
+        attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) 
+        # + A_r.transpose(2, 3).transpose(1, 2)
         if mask is not None:
             nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
@@ -696,7 +695,7 @@ class SwinTransformer(nn.Module):
         y = cartesian[1]
         x = cartesian[0]
         theta = torch.atan2(cartesian[1], cartesian[0])
-        print("single p_", radius_cuts)
+        # print("single p_", radius_cuts)
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
             img_size=img_size, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
