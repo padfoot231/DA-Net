@@ -33,7 +33,7 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
-def R(window_size, num_heads, radius, D, a_r, b_r, r_max, P):
+def R(window_size, num_heads, radius, D, a_r, b_r, P):
     # import pdb;pdb.set_trace()
     # P = 4
     D = D.unsqueeze(1).unsqueeze(3)
@@ -45,11 +45,12 @@ def R(window_size, num_heads, radius, D, a_r, b_r, r_max, P):
     r_max = r_max[:, 0, 0].unsqueeze(1).unsqueeze(2).unsqueeze(3)
     # radius = radius.transpose(0,1).transpose(1,2).transpose(2,3).transpose(0,1)
     A_r = 0
+    r_max = 2
     for i in range(1,P+1):
         A_r = a_r[i]*torch.cos((radius*2*pi*i)/(r_max+0.0000000001)) + b_r[i-1]*torch.sin((radius*2*pi*i)/(r_max+0.0000000001))
 
     # import pdb;pdb.set_trace()
-    return A_r//P + a_r[0]
+    return A_r/P + a_r[0]
 
 def phi(window_size, num_heads, azimuth, a_p, b_p, W, P):
     # import pdb;pdb.set_trace()
@@ -60,7 +61,7 @@ def phi(window_size, num_heads, azimuth, a_p, b_p, W, P):
     for i in range(1, P+1):
         A_phi = a_p[i]*torch.cos(i*azimuth) + b_p[i-1]*torch.sin(i*azimuth)
     # import pdb;pdb.set_trace()
-    return A_phi//P + a_p[0] 
+    return A_phi/P + a_p[0] 
 
 def window_partition(x, window_size, D_s):
     """
@@ -148,13 +149,13 @@ class WindowAttention(nn.Module):
         #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
         # # else:
         self.a_p = nn.Parameter(
-            torch.zeros(self.P + 1, num_heads))
+            torch.zeros(self.P+1, num_heads))
         self.b_p = nn.Parameter(
             torch.zeros(self.P, num_heads))
-        # self.a_r = nn.Parameter(
-        #     torch.zeros(self.P + 1, num_heads))
-        # self.b_r = nn.Parameter(
-        #     torch.zeros(self.P, num_heads))
+        self.a_r = nn.Parameter(
+            torch.zeros(self.P+1, num_heads))
+        self.b_r = nn.Parameter(
+            torch.zeros(self.P, num_heads))
 
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
@@ -165,10 +166,10 @@ class WindowAttention(nn.Module):
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
         radius = (relative_coords[:, :, 0]).cuda()
         azimuth = (relative_coords[:, :, 1]).cuda()
-        r_max = patch_size[0]*H
+        # r_max = patch_size[0]*H
         # import pdb;pdb.set_trace()
         # print("patch_size", patch_size[0], "azimuth", 2*np.pi/W, "r_max", r_max)
-        self.r_max = r_max
+        # self.r_max = r_max
         self.radius = radius
         self.azimuth = azimuth
 
@@ -184,9 +185,9 @@ class WindowAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         # trunc_normal_(self.relative_position_bias_table, std=.02)
         trunc_normal_(self.a_p, std=.02)
-        # trunc_normal_(self.a_r, std=.02)
+        trunc_normal_(self.a_r, std=.02)
         trunc_normal_(self.b_p, std=.02)
-        # trunc_normal_(self.b_r, std=.02)
+        trunc_normal_(self.b_r, std=.02)
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, D, mask=None):
@@ -210,11 +211,10 @@ class WindowAttention(nn.Module):
         #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
         # import pdb;pdb.set_trace()
-        # A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1], self.P)
-        A_r = R(self.window_size, self.num_heads, self.radius, D, self.a_r, self.b_r, self.r_max, self.P)
+        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1], self.P)
+        A_r = R(self.window_size, self.num_heads, self.radius, D, self.a_r, self.b_r, self.P)
         # import pdb;pdb.set_trace()
-        attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) 
-        # + A_r.transpose(2, 3).transpose(1, 2)
+        attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0) + A_r.transpose(2, 3).transpose(1, 2)
         if mask is not None:
             nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
