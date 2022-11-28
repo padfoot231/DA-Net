@@ -210,7 +210,7 @@ def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
         np.ndarray: the distorted image
     """
 
-    img = img.resize((224, 224), Image.ANTIALIAS)
+    img = img.resize((1500, 1500), Image.ANTIALIAS)
     img = np.array(img)
     # print(img.shape)
     
@@ -256,7 +256,7 @@ def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
     )
 
     distorted_image = Image.fromarray(distorted_image)
-    distorted_image = distorted_image.resize((64, 64), Image.ANTIALIAS)
+    # distorted_image = distorted_image.resize((64, 64), Image.ANTIALIAS)
     rgb_im = distorted_image.convert('RGB')
 
     return rgb_im
@@ -367,7 +367,7 @@ def get_inverse_distortion(num_points, D, max_radius):
     dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (1 + torch.outer(D[0], x**2).flatten() + torch.outer(D[1], x**4).flatten() + torch.outer(D[2], x**6).flatten() +torch.outer(D[3], x**8).flatten())
 
     theta_max = dist_func(torch.tensor([1]).cuda())
-    # import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
     theta = linspace(torch.tensor([0]).cuda(), theta_max, num_points+1).cuda()
 
     test_radius = torch.linspace(0, 1, 50).cuda()

@@ -143,7 +143,7 @@ def build_dataset(is_train, is_test, config):
             dataset = M_distort(config.DATA.DATA_PATH, task = 'test', transform = transform)
             nb_classes = 200
         else:
-            dataset = M_distort(config.DATA.DATA_PATH, task = 'test', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, task = 'test_4', transform = transform)
             nb_classes = 200
 
     else:

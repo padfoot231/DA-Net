@@ -38,7 +38,7 @@ _C.DATA.CACHE_MODE = 'part'
 # Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.
 _C.DATA.PIN_MEMORY = True
 # Number of data loading threads
-_C.DATA.NUM_WORKERS = 10
+_C.DATA.NUM_WORKERS = 3
 
 
 # -----------------------------------------------------------------------------

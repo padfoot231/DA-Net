@@ -40,6 +40,8 @@ def R(window_size, num_heads, radius, D, a_r, b_r, P):
     D = D.repeat(1, 16, 1, num_heads)
     radius = D[:, 0, :, :].unsqueeze(2)
     # radius = radius[None, :, None, :].repeat(num_heads, 1, D.shape[0], 1) # num_heads, wh, num_win*B, ww
+    # print(window_size)
+    # import pdb;pdb.set_trace()
     radius = D - radius
     r_max, b = torch.max(radius, dim=1)
     r_max = r_max[:, 0, 0].unsqueeze(1).unsqueeze(2).unsqueeze(3)
@@ -47,7 +49,7 @@ def R(window_size, num_heads, radius, D, a_r, b_r, P):
     A_r = 0
     r_max = 2
     for i in range(1,P+1):
-        A_r = a_r[i]*torch.cos((radius*2*pi*i)/(r_max+0.0000000001)) + b_r[i-1]*torch.sin((radius*2*pi*i)/(r_max+0.0000000001))
+        A_r += a_r[i]*torch.cos((radius*2*pi*i)/(r_max)) + b_r[i-1]*torch.sin((radius*2*pi*i)/(r_max))
 
     # import pdb;pdb.set_trace()
     return A_r/P + a_r[0]
@@ -59,7 +61,7 @@ def phi(window_size, num_heads, azimuth, a_p, b_p, W, P):
     # P = 4
     A_phi = 0
     for i in range(1, P+1):
-        A_phi = a_p[i]*torch.cos(i*azimuth) + b_p[i-1]*torch.sin(i*azimuth)
+        A_phi += a_p[i]*torch.cos(i*azimuth) + b_p[i-1]*torch.sin(i*azimuth)
     # import pdb;pdb.set_trace()
     return A_phi/P + a_p[0] 
 
@@ -74,8 +76,10 @@ def window_partition(x, window_size, D_s):
     """
     # print(x.shape)
     B, H, W, C = x.shape
+    # print(window_size)
     # import pdb;pdb.set_trace()
     if type(window_size) is tuple:
+        # import pdb;pdb.set_trace()
         x = x.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1], C)
         D_s = D_s.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1])
         windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size[0], window_size[1], C)
@@ -143,7 +147,7 @@ class WindowAttention(nn.Module):
         H, W = input_resolution
         # print(H, W)
         num_windows = (H//window_size[0], W//window_size[1])
-        self.P = 4  ## frequency
+        self.P = 4 ## frequency
         # define a parameter table of relative position bias
         # self.relative_position_bias_table = nn.Parameter(
         #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
@@ -279,9 +283,19 @@ class SwinTransformerBlock(nn.Module):
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
         if min(self.input_resolution) < self.window_size:
+            # import pdb;pdb.set_trace()
+            residue = self.window_size//min(self.input_resolution)
+            # if isinstance(self.window_size, tuple)
+            window = to_2tuple(self.window_size)
+            if self.input_resolution[0] == min(self.input_resolution):
+                self.window_size = (window[0]//residue, window[1]*residue)
+            
+            elif self.input_resolution[1] == min(self.input_resolution):
+                self.window_size = (window[0]*residue, window[1]//residue)
+
             # if window size is larger than input resolution, we don't partition windows
             self.shift_size = 0
-            self.window_size = (min(self.input_resolution),self.input_resolution[1]) 
+            # self.window_size = self.input_resolution
             self.attn = WindowAttention(
             patch_size, input_resolution, dim, window_size=self.window_size, num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
@@ -290,7 +304,7 @@ class SwinTransformerBlock(nn.Module):
             patch_size, input_resolution, dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
             assert 0 <= self.shift_size < self.window_size, "shift_size must in 0-window_size"
-
+        # print(self.window_size)
         self.norm1 = norm_layer(dim)
 
 
@@ -490,6 +504,7 @@ class BasicLayer(nn.Module):
         self.depth = depth
         self.use_checkpoint = use_checkpoint
         self.patch_size = patch_size
+        # print(input_resolution)
 
         # build blocks
         self.blocks = nn.ModuleList([
@@ -544,7 +559,7 @@ class PatchEmbed(nn.Module):
         norm_layer (nn.Module, optional): Normalization layer. Default: None
     """
 
-    def __init__(self, img_size=224, radius_cuts=16, azimuth_cuts=64, radius=None, azimuth=None, in_chans=3, embed_dim=96, norm_layer=None):
+    def __init__(self, img_size=224, radius_cuts=32, azimuth_cuts=32, radius=None, azimuth=None, in_chans=3, embed_dim=96, norm_layer=None):
         super().__init__()
         img_size = to_2tuple(img_size)
 
@@ -789,8 +804,8 @@ class SwinTransformer(nn.Module):
 
 if __name__=='__main__':
     model = SwinTransformer(img_size=64,
-                        radius_cuts=16, 
-                        azimuth_cuts=64,
+                        radius_cuts=8, 
+                        azimuth_cuts=128,
                         in_chans=3,
                         num_classes=200,
                         embed_dim=96,

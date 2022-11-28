@@ -71,6 +71,11 @@ class M_distort(data.Dataset):
         elif task == 'test':
             with open(self.data_path + '/test/test.pkl', 'rb') as f:
                 data = pkl.load(f)
+        elif task == 'test_1' or task == 'test_2' or task == 'test_3' or task == 'test_4' or task == 'test_5':
+            with open(self.data_path + '/test/' + task  + '.pkl', 'rb') as f:
+                data = pkl.load(f)
+                # import pdb;pdb.set_trace()
+
             # with open(self.data_path + '/val_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         
@@ -157,17 +162,17 @@ class M_distort(data.Dataset):
         if self.task == 'train' or self.task == 'val':
             # print("train")
             points = random_direction_normal(4, 1)
-            D = random_magnitude_uniform(points, high=1).T
-            D = np.array([0.89223264, 1.54899292, 3.11190657, 3.545273]) + D[0]
+            D = random_magnitude_uniform(points, high=5).T
+            D = np.array([33.21885116,5.86361501, 17.73762952, 13.39959067]) + D[0]
         # elif self.task=='val':
         #     # print("val")
         #     points = random_direction_normal(4, 1)
         #     D = random_magnitude_uniform(points, high=10).T
         #     D = np.array([33.21885116,  5.86361501, 17.73762952, 13.39959067]) + D[0]
-        elif self.task == 'test':
+        elif self.task == 'test_1' or self.task == 'test_2' or self.task == 'test_3' or self.task == 'test_4' or self.task == 'test_5' or self.task == 'test':
             D = self.test_dist[self.data[index]]
             # points = random_direction_normal(4, 1)
-            # D = random_magnitude_uniform(points, high=10).T
+            # D = random_magnitude_uniform(points, high=40).T
             # D = D[0]
             # print("testing", D)
         # images.save("test.png")
@@ -227,7 +232,7 @@ class M_distort(data.Dataset):
 
 if __name__=='__main__':
 
-    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_2010', task='train')
+    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_2010', task='test1')
     import pdb;pdb.set_trace()
     m[1]
     
