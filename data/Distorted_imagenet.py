@@ -4,17 +4,26 @@ import json
 import torch.utils.data as data
 import numpy as np
 from PIL import Image
-from utils import get_sample_params_from_subdiv, get_sample_locations, distort_image
+from utils import distort_image
+import random
 import warnings
 import torch 
+import torchvision.transforms as T
 from glob import glob
 import pickle as pkl
 import torch.nn as nn
 from datetime import datetime
 import random
 from pyinstrument import Profiler
-
+from sphericaldistortion import distort, undistort
 warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
+
+pil = T.ToPILImage()
+t = []
+
+t.append(T.ToTensor())
+# t.append(T.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
+trans =  T.Compose(t)
 
 
 def random_1():
@@ -44,7 +53,7 @@ def random_magnitude_custom(points, high=1):
 
 
 class M_distort(data.Dataset):
-    def __init__(self, root, transform=None, task='train', target_transform=None, radius_cuts=16, azimuth_cuts=64, in_chans=3, img_size=(64, 64)):
+    def __init__(self, root, distortion, transform=None, task='train', target_transform=None, radius_cuts=16, azimuth_cuts=64, in_chans=3, img_size=(64, 64)):
         super(M_distort, self).__init__()
         self.data_path = root
         # self.in_chans = in_chans
@@ -52,6 +61,7 @@ class M_distort(data.Dataset):
         # self.n_radius = 15
         # self.n_azimuth = 15
         self.img_size = img_size
+        self.dist = distortion
 
         with open(self.data_path + '/classes.pkl', 'rb') as f:
             classes = pkl.load(f)
@@ -127,104 +137,63 @@ class M_distort(data.Dataset):
 
             return sampling points for each image and targets :) 
         """
-        # print("start params")
-#         radius_buffer, azimuth_buffer = 0, 0
-#         # get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
-#         # for k in range(len(keys)):
-#         # print(dist[keys[3]])
+        # import pdb;pdb.set_trace()
 
-#         # print(self.data[self.data_img[index][0]])
-#         params = get_sample_params_from_subdiv(
-#             subdiv=self.subdiv,
-#             img_size=self.img_size,
-#             D = self.data[self.keys[index]], 
-#             n_radius=self.n_radius,
-#             n_azimuth=self.n_azimuth,
-#             radius_buffer=radius_buffer,
-#             azimuth_buffer=azimuth_buffer)
-
-
-#         # print ("start sample locations")
-#         sample_locations = get_sample_locations(**params)
-        
-# # cProfile.run(get_sample_locations())
-#         x_ = torch.tensor(sample_locations[0]).reshape(1024, 1, self.n_radius*self.n_azimuth, 1).float()
-#         x_ = x_/ 32
-#         x_.long()
-#         y_ = torch.tensor(sample_locations[1]).reshape(1024, 1, self.n_radius*self.n_azimuth, 1).float()
-#         y_ = y_/32
-#         y_.long()
-#         out = torch.cat((x_, -(y_)), dim = 3)
-
-        # print("end_sample_location")
         images = Image.open(self.data_path + '/' + self.data[index])
 
-        if self.task == 'train' or self.task == 'val':
-            # print("train")
-            points = random_direction_normal(4, 1)
-            D = random_magnitude_uniform(points, high=5).T
-            D = np.array([33.21885116,5.86361501, 17.73762952, 13.39959067]) + D[0]
-        # elif self.task=='val':
-        #     # print("val")
-        #     points = random_direction_normal(4, 1)
-        #     D = random_magnitude_uniform(points, high=10).T
-        #     D = np.array([33.21885116,  5.86361501, 17.73762952, 13.39959067]) + D[0]
-        elif self.task == 'test_1' or self.task == 'test_2' or self.task == 'test_3' or self.task == 'test_4' or self.task == 'test_5' or self.task == 'test':
-            D = self.test_dist[self.data[index]]
-            # points = random_direction_normal(4, 1)
-            # D = random_magnitude_uniform(points, high=40).T
-            # D = D[0]
-            # print("testing", D)
-        # images.save("test.png")
-        # D = np.array([0.0, 0.0, 0.0, 0.0])
-        images = distort_image(images, D)
-        # images.save("test_dis.png")
+        if self.dist == 'polynomial':
+            if self.task == 'train' or self.task == 'val':
+                # print("train")
+                points = random_direction_normal(4, 1)
+                D = random_magnitude_uniform(points, high=5).T
+                D = np.array([33.21885116,5.86361501, 17.73762952, 13.39959067]) + D[0]
+            elif self.task == 'test_1' or self.task == 'test_2' or self.task == 'test_3' or self.task == 'test_4' or self.task == 'test_5' or self.task == 'test':
+                D = self.test_dist[self.data[index]]
+            images = distort_image(images, D)
 
 
-        # images.shape
+        elif self.dist == 'spherical':
+            if self.task == 'train' or self.task == 'val':
+                xi = random.uniform(0, 1) # change the higher limit depending on the group
+            elif self.task == 'test_1' or self.task == 'test_2' or self.task == 'test_3' or self.task == 'test_4' or self.task == 'test_5' or self.task == 'test':
+                if self.task == 'test1':
+                    xi = random.uniform(0.2, 1)
+                elif self.task == 'test2':
+                    p = random.uniform(0, 1)
+                    if p > 0.5:
+                        xi = random.uniform(0.0, 0.05)
+                    else:
+                        xi = random.uniform(0.5, 0.7)
+                elif self.task == 'test3':
+                    p = random.uniform(0, 1)
+                    if p > 0.5:
+                        xi = random.uniform(0.0, 0.35)
+                    else:
+                        xi = random.uniform(0.85, 1)
+                elif self.task == 'test4':
+                    xi = random.uniform(0.0, 0.7)
 
-        # out = self.data[self.data_img[index][0]]
-
+            images, new_f, new_xi, new_fov  = distort(images, xi, f=9)
+            D = np.array([new_xi, new_f, new_fov])
 
         target = int(self.classes.index(self.data[index].split('/')[1]))
 
         # distortion = self.data_img[index][2]
         # print(distortion)
         # import pdb;pdb.set_trace()
+        res = 64
+        cartesian = torch.cartesian_prod(
+            torch.linspace(-1, 1, res),
+            torch.linspace(1, -1, res)
+        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+        radius = cartesian.norm(dim=0)
+        mask = (radius > 0.0) & (radius < 1) 
+        mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (res), mode="area")
         
 
         if self.transform is not None:
             images = self.transform(images)
-        
-        # print("distorted_dataloader")
-
-        # C, H, W = images.shape
-
-        # image = images.reshape(1, C, H, W)
-
-        # tensor = nn.functional.grid_sample(image, out.reshape(1, self.subdiv[0]*self.subdiv[1], self.n_radius*self.n_azimuth,2), align_corners = True).permute(0,2,1,3).reshape(self.subdiv[0], self.subdiv[1], self.n_radius*self.n_azimuth*self.in_chans)
-
-        # # target
-        # # target = int(idb[1])
-        # if self.target_transform is not None:
-        #     target = self.target_transform(target)
-        ######################## 
-
-        # self.num_patches = radius_cuts*azimuth_cuts
-        # self.in_chans = in_chans
-        # self.embed_dim = embed_dim
-
-        
-        # subdiv = 3
-
-        # print(tensor.shape, tensor[0].shape)
-        # import pdb;pdb.set_trace()
-
-        # now = datetime.now()
-
-        # current_time = now.strftime("%H:%M:%S")
-        # print("Current Time =", current_time)
-        # print(index)
+        # images = mask1*images
         return images, target, D
 
     def __len__(self):
@@ -232,8 +201,10 @@ class M_distort(data.Dataset):
 
 if __name__=='__main__':
 
-    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_2010', task='test1')
+    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_2010', task='train', distortion='polynomial', transform=trans)
     import pdb;pdb.set_trace()
-    m[1]
+    img = m[1]
+    img = pil(img[0])
+    img.save('distort.png')
     
 

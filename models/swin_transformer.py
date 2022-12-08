@@ -228,7 +228,8 @@ class WindowAttention(nn.Module):
             attn = self.softmax(attn)
 
         attn = self.attn_drop(attn)
-
+        # print(attn @ v.double())
+        # import pdb;pdb.set_trace()
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -348,6 +349,8 @@ class SwinTransformerBlock(nn.Module):
         assert L == H * W, "input feature has wrong size"
 
         shortcut = x
+        self.norm1 = self.norm1.double()
+        x = x.double()
         x = self.norm1(x)
         x = x.view(B, H, W, C)
 
@@ -359,6 +362,8 @@ class SwinTransformerBlock(nn.Module):
 
         # partition windows
         x_windows, D_windows = window_partition(shifted_x, self.window_size, D_s)  # nW*B, window_size, window_size, C
+        x_windows = x_windows.double()
+        self.attn = self.attn.double()
         if type(self.window_size) is tuple:
             x_windows = x_windows.view(-1, self.window_size[0] * self.window_size[1], C)
             D_windows = D_windows.view(-1, self.window_size[0] * self.window_size[1])  # nW*B, window_size*window_size, C
@@ -388,6 +393,8 @@ class SwinTransformerBlock(nn.Module):
         x = shortcut + self.drop_path(x)
 
         # FFN
+        self.norm2 = self.norm2.double()
+        self.mlp = self.mlp.double()
         x = x + self.drop_path(self.mlp(self.norm2(x)))
 
         return x, D_s
@@ -533,7 +540,8 @@ class BasicLayer(nn.Module):
             else:
                 x, D = blk(x, D_s)
         if self.downsample is not None:
-            x, D = self.downsample(x, D)
+            self.downsample = self.downsample.double()
+            x, D = self.downsample(x.double(), D)
         return x, D
 
     def extra_repr(self) -> str:
@@ -559,7 +567,7 @@ class PatchEmbed(nn.Module):
         norm_layer (nn.Module, optional): Normalization layer. Default: None
     """
 
-    def __init__(self, img_size=224, radius_cuts=32, azimuth_cuts=32, radius=None, azimuth=None, in_chans=3, embed_dim=96, norm_layer=None):
+    def __init__(self, img_size=224, distortion_model = 'spherical', radius_cuts=32, azimuth_cuts=32, radius=None, azimuth=None, in_chans=3, embed_dim=96, norm_layer=None):
         super().__init__()
         img_size = to_2tuple(img_size)
 
@@ -570,6 +578,7 @@ class PatchEmbed(nn.Module):
         self.radius_cuts = radius_cuts
         self.subdiv = (self.radius_cuts, self.azimuth_cuts)
         self.img_size = img_size
+        self.distoriton_model = distortion_model
         self.radius = radius
         self.azimuth = azimuth
         # self.measurement = 1.0
@@ -596,6 +605,8 @@ class PatchEmbed(nn.Module):
             self.norm = None
 
     def forward(self, x, dist):
+        # print(x.shape)
+        # import pdb;pdb.set_trace()
         B, C, H, W = x.shape
 
         dist = dist.transpose(1,0)
@@ -603,6 +614,7 @@ class PatchEmbed(nn.Module):
         params, D_s = get_sample_params_from_subdiv(
             subdiv=self.subdiv,
             img_size=self.img_size,
+            distortion_model = self.distoriton_model,
             D = dist, 
             n_radius=self.n_radius,
             n_azimuth=self.n_azimuth,
@@ -613,7 +625,7 @@ class PatchEmbed(nn.Module):
         sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
         B, n_p, n_s = sample_locations[0].shape
         x_ = sample_locations[0].reshape(B, n_p, n_s, 1).float()
-        x_ = x_/ 32
+        x_ = x_/32
         y_ = sample_locations[1].reshape(B, n_p, n_s, 1).float()
         y_ = y_/32
         out = torch.cat((x_, -(y_)), dim = 3)
@@ -645,6 +657,7 @@ class PatchEmbed(nn.Module):
 
         if self.norm is not None:
             x = self.norm(x)
+        
         return x, D_s
 
     def flops(self):
@@ -686,7 +699,7 @@ class SwinTransformer(nn.Module):
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
-                 use_checkpoint=False, **kwargs):
+                 use_checkpoint=False, distortion_model = 'spherical', **kwargs):
         super().__init__()
 
         self.num_classes = num_classes
@@ -713,7 +726,7 @@ class SwinTransformer(nn.Module):
         # print("single p_", radius_cuts)
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
-            img_size=img_size, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
+            img_size=img_size, distortion_model = 'spherical', radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
         patches_resolution = self.patch_embed.patches_resolution 
@@ -773,16 +786,17 @@ class SwinTransformer(nn.Module):
 
     def forward_features(self, x, dist):
         # print(x.shape)
+        # x = x.double()
         x, D_s = self.patch_embed(x, dist)
         # print(x.shape)
         # import pdb;pdb.set_trace()
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
-
+        x = x.double()
         for layer in self.layers:
             x, D_s = layer(x, D_s)
-
+        self.norm = self.norm.double()
         x = self.norm(x)  # B L C
         x = self.avgpool(x.transpose(1, 2))  # B C 1
         x = torch.flatten(x, 1)
@@ -790,7 +804,8 @@ class SwinTransformer(nn.Module):
 
     def forward(self, x, dist):
         x = self.forward_features(x, dist)
-        x = self.head(x)
+        self.head = self.head.double()
+        x = self.head(x.double())
         return x
 
     def flops(self):
@@ -821,8 +836,9 @@ if __name__=='__main__':
                         patch_norm=True,
                         use_checkpoint=False)
     model = model.cuda()
-    t = torch.ones(1, 3, 64, 64).cuda()
-    dist = torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(1, 4)).cuda()
+    import pdb;pdb.set_trace()
+    t = torch.ones(3, 3, 64, 64).cuda()
+    dist = torch.tensor([0.0, 1.5, 3.047911227757854, 0.5, 17.517568479641348, 3.047911227757854, 1.0, 33.535136959282696, 3.047911227757854]).reshape(3, 3).transpose(0,1).cuda()
 
     m = model(t, dist)
     import pdb;pdb.set_trace()

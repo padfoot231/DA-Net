@@ -137,13 +137,13 @@ def build_dataset(is_train, is_test, config):
         nb_classes = 21841
     elif config.DATA.DATASET == 'distort':
         if is_train:
-            dataset = M_distort(config.DATA.DATA_PATH, task = 'train', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, task = 'train', transform = transform)
             nb_classes = 200
         elif is_test:
-            dataset = M_distort(config.DATA.DATA_PATH, task = 'test', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, task = 'val', transform = transform)
             nb_classes = 200
         else:
-            dataset = M_distort(config.DATA.DATA_PATH, task = 'test_4', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, task = 'test_4', transform = transform)
             nb_classes = 200
 
     else:
