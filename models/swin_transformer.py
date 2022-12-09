@@ -349,8 +349,8 @@ class SwinTransformerBlock(nn.Module):
         assert L == H * W, "input feature has wrong size"
 
         shortcut = x
-        self.norm1 = self.norm1.double()
-        x = x.double()
+        # self.norm1 = self.norm1.double()
+        # x = x.double()
         x = self.norm1(x)
         x = x.view(B, H, W, C)
 
@@ -362,8 +362,8 @@ class SwinTransformerBlock(nn.Module):
 
         # partition windows
         x_windows, D_windows = window_partition(shifted_x, self.window_size, D_s)  # nW*B, window_size, window_size, C
-        x_windows = x_windows.double()
-        self.attn = self.attn.double()
+        # x_windows = x_windows.double()
+        # self.attn = self.attn.double()
         if type(self.window_size) is tuple:
             x_windows = x_windows.view(-1, self.window_size[0] * self.window_size[1], C)
             D_windows = D_windows.view(-1, self.window_size[0] * self.window_size[1])  # nW*B, window_size*window_size, C
@@ -393,8 +393,8 @@ class SwinTransformerBlock(nn.Module):
         x = shortcut + self.drop_path(x)
 
         # FFN
-        self.norm2 = self.norm2.double()
-        self.mlp = self.mlp.double()
+        # self.norm2 = self.norm2.double()
+        # self.mlp = self.mlp.double()
         x = x + self.drop_path(self.mlp(self.norm2(x)))
 
         return x, D_s
@@ -540,8 +540,8 @@ class BasicLayer(nn.Module):
             else:
                 x, D = blk(x, D_s)
         if self.downsample is not None:
-            self.downsample = self.downsample.double()
-            x, D = self.downsample(x.double(), D)
+            # self.downsample = self.downsample.double()
+            x, D = self.downsample(x, D)
         return x, D
 
     def extra_repr(self) -> str:
@@ -793,10 +793,10 @@ class SwinTransformer(nn.Module):
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
-        x = x.double()
+        # x = x.double()
         for layer in self.layers:
             x, D_s = layer(x, D_s)
-        self.norm = self.norm.double()
+        # self.norm = self.norm.double() 
         x = self.norm(x)  # B L C
         x = self.avgpool(x.transpose(1, 2))  # B C 1
         x = torch.flatten(x, 1)
@@ -804,8 +804,8 @@ class SwinTransformer(nn.Module):
 
     def forward(self, x, dist):
         x = self.forward_features(x, dist)
-        self.head = self.head.double()
-        x = self.head(x.double())
+        # self.head = self.head.double()
+        x = self.head(x)
         return x
 
     def flops(self):

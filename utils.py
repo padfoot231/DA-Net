@@ -429,14 +429,14 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model,
     max_radius = min(img_size)/2
     width = img_size[1]
     # D_min = get_inverse_distortion(subdiv[0], D, max_radius)
-    # if distortion_model == 'spherical': # in case of spherical distortion pass the 
-    #     # import pdb;pdb.set_trace()
-    #     fov = D[2][0]
-    #     f  = D[1]
-    #     xi = D[0]
-    #     D_min = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
-    # elif distortion_model == 'polynomial':
-    D_min = get_inverse_distortion(subdiv[0], D, max_radius)
+    if distortion_model == 'spherical': # in case of spherical distortion pass the 
+        # import pdb;pdb.set_trace()
+        fov = D[2][0]
+        f  = D[1]
+        xi = D[0]
+        D_min = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
+    elif distortion_model == 'polynomial':
+        D_min = get_inverse_distortion(subdiv[0], D, max_radius)
     # import pdb;pdb.set_trace()
     # D_min = np.array(dmin_list)  ## del
     D_s = torch.diff(D_min, axis = 0)

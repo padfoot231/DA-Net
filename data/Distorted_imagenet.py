@@ -142,6 +142,7 @@ class M_distort(data.Dataset):
         images = Image.open(self.data_path + '/' + self.data[index])
 
         if self.dist == 'polynomial':
+            # print("polynomial")
             if self.task == 'train' or self.task == 'val':
                 # print("train")
                 points = random_direction_normal(4, 1)
@@ -153,6 +154,7 @@ class M_distort(data.Dataset):
 
 
         elif self.dist == 'spherical':
+            # print("polynomial")
             if self.task == 'train' or self.task == 'val':
                 xi = random.uniform(0, 1) # change the higher limit depending on the group
             elif self.task == 'test_1' or self.task == 'test_2' or self.task == 'test_3' or self.task == 'test_4' or self.task == 'test_5' or self.task == 'test':
@@ -169,12 +171,12 @@ class M_distort(data.Dataset):
                     if p > 0.5:
                         xi = random.uniform(0.0, 0.35)
                     else:
-                        xi = random.uniform(0.85, 1)
+                        xi = random.uniform(0.85, 95)
                 elif self.task == 'test4':
                     xi = random.uniform(0.0, 0.7)
 
             images, new_f, new_xi, new_fov  = distort(images, xi, f=9)
-            D = np.array([new_xi, new_f, new_fov])
+            D = np.array([new_xi, new_f, new_fov]).astype(np.float32)
 
         target = int(self.classes.index(self.data[index].split('/')[1]))
 
