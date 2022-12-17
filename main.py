@@ -17,6 +17,8 @@ import wandb
 import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
+import torchvision.transforms as T
+
 
 from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.utils import accuracy, AverageMeter
@@ -29,6 +31,9 @@ from optimizer import build_optimizer
 from logger import create_logger
 from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScalerWithGradNormCount, auto_resume_helper, \
     reduce_tensor
+
+transform = T.ToPILImage()
+
 
 wandb.init(project="Distortion", entity='padfoot')
 # run_name = wandb.run.name
@@ -179,6 +184,7 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
         # print(targets)  
+        im = transform(samples[0])
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)

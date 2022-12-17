@@ -372,6 +372,7 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
 
 
 def get_inverse_distortion(num_points, D, max_radius):
+    # import pdb;pdb.set_trace()
     dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (1 + torch.outer(D[0], x**2).flatten() + torch.outer(D[1], x**4).flatten() + torch.outer(D[2], x**6).flatten() +torch.outer(D[3], x**8).flatten())
 
     theta_max = dist_func(torch.tensor([1]).cuda())
@@ -436,6 +437,7 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model,
         xi = D[0]
         D_min = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
     elif distortion_model == 'polynomial':
+        # import pdb;pdb.set_trace()
         D_min = get_inverse_distortion(subdiv[0], D, max_radius)
     # import pdb;pdb.set_trace()
     # D_min = np.array(dmin_list)  ## del

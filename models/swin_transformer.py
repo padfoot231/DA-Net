@@ -283,6 +283,7 @@ class SwinTransformerBlock(nn.Module):
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
+        # print(self.input_resolution)
         if min(self.input_resolution) < self.window_size:
             # import pdb;pdb.set_trace()
             residue = self.window_size//min(self.input_resolution)
@@ -595,8 +596,8 @@ class PatchEmbed(nn.Module):
 
         
         # subdiv = 3
-        self.n_radius = 20
-        self.n_azimuth = 20
+        self.n_radius = 10
+        self.n_azimuth = 10
         self.mlp = nn.Linear(self.n_radius*self.n_azimuth*in_chans, embed_dim)
 
         if norm_layer is not None:
@@ -726,7 +727,7 @@ class SwinTransformer(nn.Module):
         # print("single p_", radius_cuts)
         # split image into non-overlapping patches
         self.patch_embed = PatchEmbed(
-            img_size=img_size, distortion_model = 'spherical', radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
+            img_size=img_size, distortion_model = distortion_model, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts,  radius = radius, azimuth = theta, in_chans=in_chans, embed_dim=embed_dim,
             norm_layer=norm_layer if self.patch_norm else None)
         num_patches = self.patch_embed.num_patches
         patches_resolution = self.patch_embed.patches_resolution 
@@ -788,6 +789,7 @@ class SwinTransformer(nn.Module):
         # print(x.shape)
         # x = x.double()
         x, D_s = self.patch_embed(x, dist)
+        # import pdb;pdb.set_trace()
         # print(x.shape)
         # import pdb;pdb.set_trace()
         if self.ape:
@@ -819,13 +821,14 @@ class SwinTransformer(nn.Module):
 
 if __name__=='__main__':
     model = SwinTransformer(img_size=64,
-                        radius_cuts=8, 
-                        azimuth_cuts=128,
+                        radius_cuts=16, 
+                        azimuth_cuts=64,
                         in_chans=3,
                         num_classes=200,
                         embed_dim=96,
                         depths=[2, 2, 6, 2],
                         num_heads=[3, 6, 12, 1],
+                        distortion_model='spherical', 
                         window_size=4,
                         mlp_ratio=4,
                         qkv_bias=True,
@@ -836,9 +839,10 @@ if __name__=='__main__':
                         patch_norm=True,
                         use_checkpoint=False)
     model = model.cuda()
-    import pdb;pdb.set_trace()
-    t = torch.ones(3, 3, 64, 64).cuda()
-    dist = torch.tensor([0.0, 1.5, 3.047911227757854, 0.5, 17.517568479641348, 3.047911227757854, 1.0, 33.535136959282696, 3.047911227757854]).reshape(3, 3).transpose(0,1).cuda()
+    # import pdb;pdb.set_trace()
+    t = torch.ones(1, 3, 64, 64).cuda()
+    D = torch.tensor([100, 10, 10, 1]).reshape(1,4).transpose(1,0).cuda()
+    dist = torch.tensor([0.0, 1.5, 3.047911227757854]).reshape(3, 1).transpose(0,1).cuda()
 
-    m = model(t, dist)
+    m = model(t, D)
     import pdb;pdb.set_trace()

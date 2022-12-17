@@ -45,12 +45,11 @@ except:
 
 def build_loader(config):
     config.defrost()
-    dataset_train, config.MODEL.NUM_CLASSES = build_dataset(is_train=True, is_test=False, config=config)
+    dataset_train, config.MODEL.NUM_CLASSES = build_dataset(is_train=True, config=config)
     config.freeze()
     print(f"local rank {config.LOCAL_RANK} / global rank {dist.get_rank()} successfully build train dataset")
-    dataset_test, _ = build_dataset(is_train=False, is_test=True, config=config)
-    print(f"local rank {config.LOCAL_RANK} / global rank {dist.get_rank()} successfully build val dataset")
-    dataset_val, _ = build_dataset(is_train=False,is_test=False, config=config)
+    
+    dataset_val, _ = build_dataset(is_train=False, config=config)
     print(f"local rank {config.LOCAL_RANK} / global rank {dist.get_rank()} successfully build val dataset")
 
     num_tasks = dist.get_world_size()
@@ -65,13 +64,9 @@ def build_loader(config):
 
     if config.TEST.SEQUENTIAL:
         sampler_val = torch.utils.data.SequentialSampler(dataset_val)
-        sampler_test = torch.utils.data.SequentialSampler(dataset_test)
     else:
         sampler_val = torch.utils.data.distributed.DistributedSampler(
             dataset_val, shuffle=False
-        )
-        sampler_test = torch.utils.data.distributed.DistributedSampler(
-            dataset_test, shuffle=False
         )
 
 
@@ -93,14 +88,6 @@ def build_loader(config):
     )
 
 
-    data_loader_test = torch.utils.data.DataLoader(
-        dataset_test, sampler=sampler_test,
-        batch_size=config.DATA.BATCH_SIZE,
-        shuffle=False,
-        num_workers=config.DATA.NUM_WORKERS,
-        pin_memory=config.DATA.PIN_MEMORY,
-        drop_last=False
-    )
 
     # setup mixup / cutmix
     mixup_fn = None
@@ -114,8 +101,8 @@ def build_loader(config):
     return dataset_train, dataset_val, data_loader_train, data_loader_val, mixup_fn
 
 
-def build_dataset(is_train, is_test, config):
-    transform = build_transform(is_train, is_test, config)
+def build_dataset(is_train, config):
+    transform = build_transform(is_train, config)
     if config.DATA.DATASET == 'imagenet':
         prefix = 'train' if is_train else 'val'
         if config.DATA.ZIP_MODE:
@@ -137,13 +124,10 @@ def build_dataset(is_train, is_test, config):
         nb_classes = 21841
     elif config.DATA.DATASET == 'distort':
         if is_train:
-            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, task = 'train', transform = transform)
-            nb_classes = 200
-        elif is_test:
-            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, task = 'val', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'train', transform = transform)
             nb_classes = 200
         else:
-            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, task = 'test_4', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'val', transform = transform)
             nb_classes = 200
 
     else:
@@ -152,7 +136,7 @@ def build_dataset(is_train, is_test, config):
     return dataset, nb_classes
 
 
-def build_transform(is_train,is_test, config):
+def build_transform(is_train, config):
     # resize_im = config.DATA.IMG_SIZE > 32
     # if is_train:
     #     # this should always dispatch to transforms_imagenet_train

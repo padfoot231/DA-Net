@@ -145,7 +145,7 @@ def save_checkpoint(config, epoch, model, max_accuracy, optimizer, lr_scheduler,
                   'epoch': epoch,
                   'config': config}
 
-    if epoch%1 == 0:
+    if epoch%5 == 0:
         save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}.pth')
         logger.info(f"{save_path} saving......")
         torch.save(save_state, save_path)
@@ -539,7 +539,8 @@ if __name__=='__main__':
     # radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
     radius_buffer = azimuth_buffer = 0
 
-    D = torch.tensor(np.array([0.0, 0.0, 0.0, 0.0]).reshape(1,4).transpose(1,0)).cuda()
+    a = torch.tensor([0.5, 17.517568479641348, 3.047911227757854]).reshape(1, 3).transpose(0,1).cuda()
+    D = torch.tensor(np.array([100, 10, 10, 1]).reshape(1,4).transpose(1,0)).cuda()
     # import pdb;pdb.set_trace()
 
     params, D_s = get_sample_params_from_subdiv(
@@ -549,7 +550,8 @@ if __name__=='__main__':
         D = D,
         n_azimuth=n_azimuth,
         radius_buffer=radius_buffer,
-        azimuth_buffer=azimuth_buffer
+        azimuth_buffer=azimuth_buffer, 
+        distortion_model = 'polynomial'
     )
 
     # import pdb;pdb.set_trace()

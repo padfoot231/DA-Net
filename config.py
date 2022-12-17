@@ -39,6 +39,8 @@ _C.DATA.CACHE_MODE = 'part'
 _C.DATA.PIN_MEMORY = True
 # Number of data loading threads
 _C.DATA.NUM_WORKERS = 3
+_C.DATA.low = 0.0
+_C.DATA.high = 0.05
 
 
 # -----------------------------------------------------------------------------

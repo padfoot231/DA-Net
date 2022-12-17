@@ -16,6 +16,9 @@ from datetime import datetime
 import random
 from pyinstrument import Profiler
 from sphericaldistortion import distort, undistort
+
+profiler = Profiler(interval=0.0001)
+
 warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
 
 pil = T.ToPILImage()
@@ -53,7 +56,7 @@ def random_magnitude_custom(points, high=1):
 
 
 class M_distort(data.Dataset):
-    def __init__(self, root, distortion, transform=None, task='train', target_transform=None, radius_cuts=16, azimuth_cuts=64, in_chans=3, img_size=(64, 64)):
+    def __init__(self, root, distortion, low, high, transform=None, task='train', target_transform=None, radius_cuts=16, azimuth_cuts=64, in_chans=3, img_size=(64, 64)):
         super(M_distort, self).__init__()
         self.data_path = root
         # self.in_chans = in_chans
@@ -62,6 +65,8 @@ class M_distort(data.Dataset):
         # self.n_azimuth = 15
         self.img_size = img_size
         self.dist = distortion
+        self.low = low
+        self.high = high 
 
         with open(self.data_path + '/classes.pkl', 'rb') as f:
             classes = pkl.load(f)
@@ -78,20 +83,26 @@ class M_distort(data.Dataset):
         elif task == 'val':
             with open(self.data_path + '/val/val.pkl', 'rb') as f:
                 data = pkl.load(f)
-        elif task == 'test':
-            with open(self.data_path + '/test/test.pkl', 'rb') as f:
-                data = pkl.load(f)
         elif task == 'test_1' or task == 'test_2' or task == 'test_3' or task == 'test_4' or task == 'test_5':
-            with open(self.data_path + '/test/' + task  + '.pkl', 'rb') as f:
+            with open(self.data_path + '/test_cls/test_cls.pkl', 'rb') as f:
                 data = pkl.load(f)
+            if distortion == 'spherical':
+                with open(self.data_path + '/test_cls/' + task  + '.pkl', 'rb') as f:
+                    test_dist = pkl.load(f)
+                    self.test_dist = test_dist
+            elif distortion == 'polynomial':
+                with open(self.data_path + '/dist_params.pkl', 'rb') as f:
+                    test_dist = pkl.load(f)
+                    self.test_dist = test_dist
+
+
                 # import pdb;pdb.set_trace()
 
             # with open(self.data_path + '/val_data.pkl', 'rb') as f:
             #     data = pkl.load(f)
         
 
-        with open(self.data_path + '/dist_params.pkl', 'rb') as f:
-            test_dist = pkl.load(f)
+
 
 
         # classes = list(data.keys())
@@ -109,7 +120,7 @@ class M_distort(data.Dataset):
         #     for j in range(len(data[classes[i]])):
         #         data_img[idx] = (data[classes[i]][j], i, data[classes[i]][j].split('/')[-2])
         #         idx = idx+1
-        self.test_dist = test_dist
+        # self.test_dist = test_dist
         self.task = task 
         # self.data_img = data_img
         self.data = data
@@ -156,25 +167,11 @@ class M_distort(data.Dataset):
         elif self.dist == 'spherical':
             # print("polynomial")
             if self.task == 'train' or self.task == 'val':
-                xi = random.uniform(0, 1) # change the higher limit depending on the group
+                xi = random.uniform(self.low, self.high) # change the higher limit depending on the group
             elif self.task == 'test_1' or self.task == 'test_2' or self.task == 'test_3' or self.task == 'test_4' or self.task == 'test_5' or self.task == 'test':
-                if self.task == 'test1':
-                    xi = random.uniform(0.2, 1)
-                elif self.task == 'test2':
-                    p = random.uniform(0, 1)
-                    if p > 0.5:
-                        xi = random.uniform(0.0, 0.05)
-                    else:
-                        xi = random.uniform(0.5, 0.7)
-                elif self.task == 'test3':
-                    p = random.uniform(0, 1)
-                    if p > 0.5:
-                        xi = random.uniform(0.0, 0.35)
-                    else:
-                        xi = random.uniform(0.85, 95)
-                elif self.task == 'test4':
-                    xi = random.uniform(0.0, 0.7)
+                xi = self.test_dist[self.data[index]]
 
+            # import pdb;pdb.set_trace()
             images, new_f, new_xi, new_fov  = distort(images, xi, f=9)
             D = np.array([new_xi, new_f, new_fov]).astype(np.float32)
 
@@ -202,11 +199,13 @@ class M_distort(data.Dataset):
         return len(self.data)
 
 if __name__=='__main__':
-
-    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_2010', task='train', distortion='polynomial', transform=trans)
-    import pdb;pdb.set_trace()
+    profiler.start()
+    m = M_distort('/home-local2/akath.extra.nobkp/imagenet_2010', task='val', distortion='spherical', low = 0.5, high = 0.7, transform=trans)
+    # import pdb;pdb.set_trace()
     img = m[1]
     img = pil(img[0])
-    img.save('distort.png')
+    img.save('undistort.png')
+    profiler.stop()
+    profiler.print()
     
 
