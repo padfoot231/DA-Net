@@ -13,6 +13,7 @@ import argparse
 import datetime
 import numpy as np
 import wandb
+import pickle as pkl
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -33,7 +34,7 @@ from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScale
     reduce_tensor
 
 transform = T.ToPILImage()
-
+data_dic = {}
 
 wandb.init(project="Distortion", entity='padfoot')
 # run_name = wandb.run.name
@@ -180,7 +181,7 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
 
     start = time.time()
     end = time.time()
-    for idx, (samples, targets, dist) in enumerate(data_loader):
+    for idx, (samples, targets, dist, name) in enumerate(data_loader):
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
         # print(targets)  
@@ -247,14 +248,15 @@ def validate(config, data_loader, model):
     running_loss = 0
     running_acc1 = 0
     running_acc5 = 0
-    for idx, (images, target, dist) in enumerate(data_loader):
+    for idx, (images, target, dist, name) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
         # compute output
         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
             output = model(images, dist)
-
+        # for i in range(output.shape[0]):    
+        #     data_dic[name[i].split('/')[-1]] = output[i]
         # measure accuracy and record loss
         loss = criterion(output, target)
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
@@ -283,6 +285,8 @@ def validate(config, data_loader, model):
                 f'Acc@1 {acc1_meter.val:.3f} ({acc1_meter.avg:.3f})\t'
                 f'Acc@5 {acc5_meter.val:.3f} ({acc5_meter.avg:.3f})\t'
                 f'Mem {memory_used:.0f}MB')
+    # with open('/home-local2/akath.extra.nobkp/rad_gp4_gp4.pkl', 'wb') as f:
+    #     pkl.dump(data_dic, f)
     logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
     wandb.log({"loss_val" :loss_meter.avg, 
             "Acc1" : acc1_meter.avg, 
@@ -305,7 +309,7 @@ def test(config, data_loader, model):
     running_loss_test = 0
     running_acc1 = 0
     running_acc5 = 0
-    for idx, (images, target, dist) in enumerate(data_loader):
+    for idx, (images, target, dist, name) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 

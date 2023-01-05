@@ -193,7 +193,7 @@ class M_distort(data.Dataset):
         if self.transform is not None:
             images = self.transform(images)
         # images = mask1*images
-        return images, target, D
+        return images, target, D, self.data[index]
 
     def __len__(self):
         return len(self.data)
