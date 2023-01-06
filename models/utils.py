@@ -304,7 +304,8 @@ def linspace(start, stop, num):
     
     return out
 
-def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, subdiv, radius_buffer=0, azimuth_buffer=0):
+def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, subdiv,  fov, focal,xi,  radius_buffer=0, azimuth_buffer=0):
+    # import pdb;pdb.set_trace()
     """Get the sample locations in a given radius and azimuth range
     
     Args:
@@ -323,6 +324,10 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     """
     #Compute center of the image to shift the samples later
     # import pdb;pdb.set_trace()
+    new_f = focal
+    rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
+    inverse_rad = lambda r: torch.tan(torch.arcsin(xi*r/(new_f)/torch.sqrt(1 + (r/(new_f))*(r/(new_f)))) + torch.arctan(r/(new_f)))
+
     center = [img_size[0]/2, img_size[1]/2]
     if img_size[0] % 2 == 0:
         center[0] -= 0.5
@@ -330,20 +335,23 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
         center[1] -= 0.5
     # import pdb;pdb.set_trace()
     # Sweep start and end
-    r_start = dmin + ds 
+    r_end = dmin + ds 
     # - radius_buffer
-    r_end = dmin 
+    r_start = dmin 
     # + radius_buffer
     alpha_start = phi 
     B = dmin.shape[1]
-    
+
     # + azimuth_buffer
     alpha_end = alpha + phi 
     # - azimuth_buffer
     # import pdb;pdb.set_trace()
     # Get the sample locations
     # import pdb;pdb.set_trace()
-    radius = linspace(r_start, r_end, n_radius)
+    # r1 = linspace(r_start, r_end, n_radius)
+    radius = linspace(inverse_rad(r_start), inverse_rad(r_end), n_radius)
+    radius = rad(radius)
+    # import pdb;pdb.set_trace()
     radius = torch.transpose(radius, 0,1)
     radius = radius.reshape(radius.shape[0]*radius.shape[1], B)
     azimuth = linspace(alpha_start, alpha_end, n_azimuth)
@@ -357,9 +365,9 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     # import pdb;pdb.set_trace()
     radius_mesh = radius.reshape(subdiv[0]*subdiv[1], n_radius, n_azimuth, B)
     # import pdb;pdb.set_trace()
-    d = radius_mesh[0][0][0][0] - radius_mesh[0][1][0][0]
+    # d = radius_mesh[0][0][0][0] - radius_mesh[0][1][0][0]
     # eps = np.random.normal(0, d/3)
-    radius_mesh = random.uniform(radius_mesh-d, radius_mesh+d)
+    # radius_mesh = random.uniform(radius_mesh-d, radius_mesh+d)
     # radius_mesh = radius_mesh + eps
     # import pdb;pdb.set_trace()
     azimuth_mesh = azimuth.reshape(n_radius, subdiv[0]*subdiv[1], n_azimuth, B).transpose(0,1)  
@@ -408,11 +416,20 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # new_f = compute_focal(fov, new_xi, width)
     # import pdb;pdb.set_trace()
     rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
-    inverse_rad = lambda r: np.tan(np.arctan(new_f/r) + np.arcsin(xi*new_f/np.sqrt(new_f*new_f + r*r)))
+    # rad_1 = lambda x: new_f/8*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
+    inverse_rad = lambda r: torch.tan(torch.arcsin(xi*r/(new_f)*(1 + (r/(new_f))*(r/(new_f)))) + torch.arctan(r/(new_f)))
 #     theta_d_max = inverse_rad(new_f)
+    min = inverse_rad(2.0)
     theta_d_max = torch.tan(fov/2).cuda()
     theta_d = linspace(torch.tensor([0]).cuda(), theta_d_max, num_points+1).cuda()
+    t1 = inverse_rad(2.0)
+    t2 = inverse_rad(4.0)
+    # theta_d_num = linspace(torch.tensor([0]).cuda(), theta_d_max, (num_points+1)*8).cuda()
+    theta_d_num1 = linspace(t1, t2, 10).cuda()
     r_list = rad(theta_d)   
+    # r_lin = rad(theta_d_num)
+    # r_d = rad(theta_d_num1)
+    # import pdb;pdb.set_trace()
     return r_list
 
 def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda(), radius_buffer=0, azimuth_buffer=0):
@@ -458,7 +475,7 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model,
     # Generate parameters for each patch
     params = {
         'alpha': alpha, "phi": phi, "dmin": D_min, "ds": D_s, "n_azimuth": n_azimuth, "n_radius": n_radius,
-        "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv
+        "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv, "fov": fov, "xi": xi, "focal" : f, 
     }
     # import pdb;pdb.set_trace()
 

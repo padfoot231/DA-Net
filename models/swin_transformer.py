@@ -842,7 +842,7 @@ if __name__=='__main__':
     # import pdb;pdb.set_trace()
     t = torch.ones(1, 3, 64, 64).cuda()
     D = torch.tensor([100, 10, 10, 1]).reshape(1,4).transpose(1,0).cuda()
-    dist = torch.tensor([0.0, 1.5, 3.047911227757854]).reshape(3, 1).transpose(0,1).cuda()
+    dist = torch.tensor([0.5, 17.51, 3.047911227757854]).reshape(3, 1).transpose(0,1).cuda()
 
-    m = model(t, D)
+    m = model(t, dist)
     import pdb;pdb.set_trace()

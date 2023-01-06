@@ -304,7 +304,7 @@ def linspace(start, stop, num):
     
     return out
 
-def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, subdiv, radius_buffer=0, azimuth_buffer=0):
+def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, subdiv,  fov, focal,xi, radius_buffer=0, azimuth_buffer=0):
     """Get the sample locations in a given radius and azimuth range
     
     Args:
@@ -323,6 +323,10 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     """
     #Compute center of the image to shift the samples later
     # import pdb;pdb.set_trace()
+
+    rad = lambda x: focal*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
+    inverse_rad = lambda r: torch.tan(torch.arcsin(xi*r/(focal)/torch.sqrt(1 + (r/(focal))*(r/(focal)))) + torch.arctan(r/(focal)))
+
     center = [img_size[0]/2, img_size[1]/2]
     if img_size[0] % 2 == 0:
         center[0] -= 0.5
@@ -333,6 +337,7 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     r_start = dmin + ds 
     # - radius_buffer
     r_end = dmin 
+    # import pdb;pdb.set_trace()
     # + radius_buffer
     alpha_start = phi 
     B = dmin.shape[1]
@@ -343,7 +348,9 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     # import pdb;pdb.set_trace()
     # Get the sample locations
     # import pdb;pdb.set_trace()
-    radius = linspace(r_start, r_end, n_radius)
+    # radius = linspace(r_start, r_end, n_radius)
+    radius = linspace(inverse_rad(r_start), inverse_rad(r_end), n_radius)
+    radius = rad(radius)
     radius = torch.transpose(radius, 0,1)
     radius = radius.reshape(radius.shape[0]*radius.shape[1], B)
     azimuth = linspace(alpha_start, alpha_end, n_azimuth)
@@ -456,7 +463,7 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model,
     # Generate parameters for each patch
     params = {
         'alpha': alpha, "phi": phi, "dmin": D_min, "ds": D_s, "n_azimuth": n_azimuth, "n_radius": n_radius,
-        "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv
+        "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv, "fov": fov, "xi": xi, "focal" : f, 
     }
     # import pdb;pdb.set_trace()
 
