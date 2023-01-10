@@ -1,11 +1,10 @@
 #!/bin/bash 
-export WANDB_MODE="disabled"
+# export WANDB_MODE="disabled"
 
 
 python -m torch.distributed.launch \
---nproc_per_node 3 \
+--nproc_per_node 2 \
 --master_port 12345  main.py \
---resume output/one_distortion_swin_small_patch2_window4_64_gp1/default/ckpt_epoch_70.pth \
---cfg configs/swin/one_distortion_swin_small_patch2_window4_64_gp1.yaml \
+--cfg configs/swin/one_distortion_swin_small_patch2_window4_64_gp2_jit.yaml \
 --data-path /home-local2/akath.extra.nobkp/imagenet_2010 \
 --batch-size 128

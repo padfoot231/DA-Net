@@ -364,12 +364,16 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     # import pdb;pdb.set_trace()
     radius_mesh = radius.reshape(subdiv[0]*subdiv[1], n_radius, n_azimuth, B)
     # import pdb;pdb.set_trace()
-    # d = radius_mesh[0][0][0][0] - radius_mesh[0][1][0][0]
+    d = radius_mesh[0][0][0][0] - radius_mesh[0][1][0][0]
     # eps = np.random.normal(0, d/3)
-    # radius_mesh = random.uniform(radius_mesh-d, radius_mesh+d)
+    radius_mesh = random.uniform(radius_mesh-d, radius_mesh+d)
+    
     # radius_mesh = radius_mesh + eps
     # import pdb;pdb.set_trace()
     azimuth_mesh = azimuth.reshape(n_radius, subdiv[0]*subdiv[1], n_azimuth, B).transpose(0,1)  
+    d_ = azimuth_mesh[0][0][0][0] - azimuth_mesh[0][1][0][0]
+    # eps = np.random.normal(0, d/3)
+    azimuth_mesh = random.uniform(azimuth_mesh-d_, azimuth_mesh+d_)
     azimuth_mesh_cos  = torch.cos(azimuth_mesh) 
     azimuth_mesh_sine = torch.sin(azimuth_mesh) 
     x = radius_mesh * azimuth_mesh_cos    # takes time the cosine and multiplication function 

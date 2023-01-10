@@ -127,7 +127,7 @@ def build_dataset(is_train, config):
             dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'train', transform = transform)
             nb_classes = 200
         else:
-            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'val', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'test_3', transform = transform)
             nb_classes = 200
 
     else:
