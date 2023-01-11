@@ -8,6 +8,7 @@
 from .swin_transformer import SwinTransformer
 from .swin_transformer_v2 import SwinTransformerV2
 from .swin_mlp import SwinMLP
+from .swin_transformer_az import SwinTransformerAz
 
 
 def build_model(config):
@@ -15,6 +16,25 @@ def build_model(config):
 
     if model_type == 'swin':
         model = SwinTransformer(img_size=config.DATA.IMG_SIZE,
+                                radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
+                                azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,
+                                in_chans=config.MODEL.SWIN.IN_CHANS,
+                                num_classes=config.MODEL.NUM_CLASSES,
+                                embed_dim=config.MODEL.SWIN.EMBED_DIM,
+                                depths=config.MODEL.SWIN.DEPTHS,
+                                num_heads=config.MODEL.SWIN.NUM_HEADS,
+                                window_size=config.MODEL.SWIN.WINDOW_SIZE,
+                                mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
+                                qkv_bias=config.MODEL.SWIN.QKV_BIAS,
+                                qk_scale=config.MODEL.SWIN.QK_SCALE,
+                                drop_rate=config.MODEL.DROP_RATE,
+                                drop_path_rate=config.MODEL.DROP_PATH_RATE,
+                                ape=config.MODEL.SWIN.APE,
+                                patch_norm=config.MODEL.SWIN.PATCH_NORM,
+                                use_checkpoint=config.TRAIN.USE_CHECKPOINT,
+                                distortion_model = config.MODEL.DISTORTION)
+    if model_type == 'swin_az':
+        model = SwinTransformerAz(img_size=config.DATA.IMG_SIZE,
                                 radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
                                 azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,
                                 in_chans=config.MODEL.SWIN.IN_CHANS,
