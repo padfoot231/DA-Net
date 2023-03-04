@@ -33,7 +33,7 @@ def build_model(config):
                                 patch_norm=config.MODEL.SWIN.PATCH_NORM,
                                 use_checkpoint=config.TRAIN.USE_CHECKPOINT,
                                 distortion_model = config.MODEL.DISTORTION)
-    if model_type == 'swin_az':
+    elif model_type == 'swin_az':
         model = SwinTransformerAz(img_size=config.DATA.IMG_SIZE,
                                 radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
                                 azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,

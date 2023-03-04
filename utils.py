@@ -15,9 +15,49 @@ import numpy as np
 import torch.distributed as dist
 from torch._six import inf
 import scipy.optimize
-from pyinstrument import Profiler
+# from pyinstrument import Profiler
 from PIL import Image
-profiler = Profiler(interval=0.0001)
+import torch.nn as nn
+# profiler = Profiler(interval=0.0001)
+
+class DiceLoss(nn.Module):
+    def __init__(self, n_classes):
+        super(DiceLoss, self).__init__()
+        self.n_classes = n_classes
+
+    def _one_hot_encoder(self, input_tensor):
+        tensor_list = []
+        for i in range(self.n_classes):
+            temp_prob = input_tensor == i  # * torch.ones_like(input_tensor)
+            tensor_list.append(temp_prob.unsqueeze(1))
+        output_tensor = torch.cat(tensor_list, dim=1)
+        return output_tensor.float()
+
+    def _dice_loss(self, score, target):
+        target = target.float()
+        smooth = 1e-5
+        intersect = torch.sum(score * target)
+        y_sum = torch.sum(target * target)
+        z_sum = torch.sum(score * score)
+        loss = (2 * intersect + smooth) / (z_sum + y_sum + smooth)
+        loss = 1 - loss
+        return loss
+
+    def forward(self, inputs, target, weight=None, softmax=False):
+        if softmax:
+            inputs = torch.softmax(inputs, dim=1)
+        target = self._one_hot_encoder(target)
+        if weight is None:
+            weight = [1] * self.n_classes
+        assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
+        class_wise_dice = []
+        loss = 0.0
+        for i in range(0, self.n_classes):
+            dice = self._dice_loss(inputs[:, i], target[:, i])
+            class_wise_dice.append(1.0 - dice.item())
+            loss += dice * weight[i]
+        return loss / self.n_classes
+
 
 def load_checkpoint(config, model, optimizer, lr_scheduler, loss_scaler, logger):
     logger.info(f"==============> Resuming form {config.MODEL.RESUME}....................")
@@ -304,7 +344,8 @@ def linspace(start, stop, num):
     
     return out
 
-def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, subdiv,  fov, focal,xi, radius_buffer=0, azimuth_buffer=0):
+def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, subdiv, distort ,  fov=0, focal=0,xi=0,  radius_buffer=0, azimuth_buffer=0):
+    # import pdb;pdb.set_trace()
     """Get the sample locations in a given radius and azimuth range
     
     Args:
@@ -323,9 +364,9 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     """
     #Compute center of the image to shift the samples later
     # import pdb;pdb.set_trace()
-
-    rad = lambda x: focal*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
-    inverse_rad = lambda r: torch.tan(torch.arcsin(xi*r/(focal)/torch.sqrt(1 + (r/(focal))*(r/(focal)))) + torch.arctan(r/(focal)))
+    new_f = focal
+    rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
+    inverse_rad = lambda r: torch.tan(torch.arcsin(xi*r/(new_f)/torch.sqrt(1 + (r/(new_f))*(r/(new_f)))) + torch.arctan(r/(new_f)))
 
     center = [img_size[0]/2, img_size[1]/2]
     if img_size[0] % 2 == 0:
@@ -334,24 +375,32 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
         center[1] -= 0.5
     # import pdb;pdb.set_trace()
     # Sweep start and end
-    r_start = dmin + ds 
+    r_end = dmin + ds 
     # - radius_buffer
-    r_end = dmin 
-    # import pdb;pdb.set_trace()
+    r_start = dmin 
     # + radius_buffer
     alpha_start = phi 
     B = dmin.shape[1]
-    
+
     # + azimuth_buffer
     alpha_end = alpha + phi 
     # - azimuth_buffer
     # import pdb;pdb.set_trace()
     # Get the sample locations
     # import pdb;pdb.set_trace()
-    # radius = linspace(r_start, r_end, n_radius)
-    radius = linspace(inverse_rad(r_start), inverse_rad(r_end), n_radius)
-    radius = rad(radius)
+    # r1 = linspace(r_start, r_end, n_radius)
+    if distort == 'spherical':
+        radius = linspace(inverse_rad(r_start), inverse_rad(r_end), n_radius)
+        radius = rad(radius)
+    elif distort  == 'polynomial':
+        radius = linspace(r_start, r_end, n_radius)
+    # import pdb;pdb.set_trace()
     radius = torch.transpose(radius, 0,1)
+    # import pdb;pdb.set_trace()
+    d = (radius[:, 0] - radius[:, 1])[:subdiv[0]]
+    d = d.reshape(1, d.shape[0], radius.shape[2]).repeat_interleave(subdiv[1], 0).reshape(subdiv[0]*subdiv[1], 1,radius.shape[2])
+    radius = random.uniform(radius+d, radius)
+
     radius = radius.reshape(radius.shape[0]*radius.shape[1], B)
     azimuth = linspace(alpha_start, alpha_end, n_azimuth)
     azimuth = torch.transpose(azimuth, 0,1)
@@ -364,10 +413,9 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
     # import pdb;pdb.set_trace()
     radius_mesh = radius.reshape(subdiv[0]*subdiv[1], n_radius, n_azimuth, B)
     # import pdb;pdb.set_trace()
-    d = radius_mesh[0][0][0][0] - radius_mesh[0][1][0][0]
+    # d = radius_mesh[0][0][0][0] - radius_mesh[0][1][0][0]
     # eps = np.random.normal(0, d/3)
-    radius_mesh = random.uniform(radius_mesh-d, radius_mesh+d)
-    
+    # radius_mesh = random.uniform(radius_mesh-d, radius_mesh+d)
     # radius_mesh = radius_mesh + eps
     # import pdb;pdb.set_trace()
     azimuth_mesh = azimuth.reshape(n_radius, subdiv[0]*subdiv[1], n_azimuth, B).transpose(0,1)  
@@ -383,7 +431,9 @@ def get_sample_locations(alpha, phi, dmin, ds, n_azimuth, n_radius, img_size, su
 
 
 def get_inverse_distortion(num_points, D, max_radius):
-    dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (1 + torch.outer(D[0], x**2).flatten() + torch.outer(D[1], x**4).flatten() + torch.outer(D[2], x**6).flatten() +torch.outer(D[3], x**8).flatten())
+    # import pdb;pdb.set_trace()
+    # dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (1 + torch.outer(D[0], x**2).flatten() + torch.outer(D[1], x**4).flatten() + torch.outer(D[2], x**6).flatten() +torch.outer(D[3], x**8).flatten())
+    dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (torch.outer(D[0], x**0).flatten() + torch.outer(D[1], x**1).flatten() + torch.outer(D[2], x**2).flatten() +torch.outer(D[3], x**3).flatten())
 
     theta_max = dist_func(torch.tensor([1]).cuda())
     # import pdb;pdb.set_trace()
@@ -418,11 +468,20 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # new_f = compute_focal(fov, new_xi, width)
     # import pdb;pdb.set_trace()
     rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
-    inverse_rad = lambda r: np.tan(np.arctan(new_f/r) + np.arcsin(xi*new_f/np.sqrt(new_f*new_f + r*r)))
+    # rad_1 = lambda x: new_f/8*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
+    inverse_rad = lambda r: torch.tan(torch.arcsin(xi*r/(new_f)*(1 + (r/(new_f))*(r/(new_f)))) + torch.arctan(r/(new_f)))
 #     theta_d_max = inverse_rad(new_f)
+    min = inverse_rad(2.0)
     theta_d_max = torch.tan(fov/2).cuda()
     theta_d = linspace(torch.tensor([0]).cuda(), theta_d_max, num_points+1).cuda()
+    t1 = inverse_rad(2.0)
+    t2 = inverse_rad(4.0)
+    # theta_d_num = linspace(torch.tensor([0]).cuda(), theta_d_max, (num_points+1)*8).cuda()
+    theta_d_num1 = linspace(t1, t2, 10).cuda()
     r_list = rad(theta_d)   
+    # r_lin = rad(theta_d_num)
+    # r_d = rad(theta_d_num1)
+    # import pdb;pdb.set_trace()
     return r_list
 
 def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda(), radius_buffer=0, azimuth_buffer=0):
@@ -447,6 +506,7 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model,
         xi = D[0]
         D_min = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
     elif distortion_model == 'polynomial':
+        # import pdb;pdb.set_trace()
         D_min = get_inverse_distortion(subdiv[0], D, max_radius)
     # import pdb;pdb.set_trace()
     # D_min = np.array(dmin_list)  ## del
@@ -465,10 +525,17 @@ def get_sample_params_from_subdiv(subdiv, n_radius, n_azimuth, distortion_model,
     phi = p.transpose(1,0).flatten().cuda()
     alpha = alpha.repeat_interleave(subdiv[0]*subdiv[1])
     # Generate parameters for each patch
-    params = {
-        'alpha': alpha, "phi": phi, "dmin": D_min, "ds": D_s, "n_azimuth": n_azimuth, "n_radius": n_radius,
-        "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv, "fov": fov, "xi": xi, "focal" : f, 
-    }
+    # import pdb;pdb.set_trace()
+    if distortion_model == 'spherical':
+        params = {
+            'alpha': alpha, "phi": phi, "dmin": D_min, "ds": D_s, "n_azimuth": n_azimuth, "n_radius": n_radius,
+            "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv, "fov": fov, "xi": xi, "focal" : f, "distort" : distortion_model,
+        }
+    elif distortion_model == 'polynomial':
+        params = {
+            'alpha': alpha, "phi": phi, "dmin": D_min, "ds": D_s, "n_azimuth": n_azimuth, "n_radius": n_radius,
+            "img_size": img_size, "radius_buffer": radius_buffer, "azimuth_buffer": azimuth_buffer, "subdiv" : subdiv, "distort" : distortion_model,
+        }
     # import pdb;pdb.set_trace()
 
     return params, D_s.reshape(subdiv[1], subdiv[0], D.shape[1]).T
@@ -533,7 +600,7 @@ class NativeScalerWithGradNormCount:
 
 
 if __name__=='__main__':
-    profiler.start()
+    # profiler.start()
     # import matplotlib.pyplot as plt
     # _, ax = plt.subplots(figsize=(8, 8))
     # ax.set_title("Sampling locations")
@@ -550,8 +617,7 @@ if __name__=='__main__':
     # radius_buffer, azimuth_buffer = get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size)
     radius_buffer = azimuth_buffer = 0
 
-    a = torch.tensor([0.5, 17.517568479641348, 3.047911227757854]).reshape(1, 3).transpose(0,1).cuda()
-    D = torch.tensor(np.array([100, 10, 10, 1]).reshape(1,4).transpose(1,0)).cuda()
+    D = torch.tensor(np.array([0.0, 0.0, 0.0, 0.0]).reshape(1,4).transpose(1,0)).cuda()
     # import pdb;pdb.set_trace()
 
     params, D_s = get_sample_params_from_subdiv(
@@ -561,13 +627,12 @@ if __name__=='__main__':
         D = D,
         n_azimuth=n_azimuth,
         radius_buffer=radius_buffer,
-        azimuth_buffer=azimuth_buffer, 
-        distortion_model = 'polynomial'
+        azimuth_buffer=azimuth_buffer
     )
 
-    # import pdb;pdb.set_trace()
+    import pdb;pdb.set_trace()
 
     sample_locations = get_sample_locations(**params)
-    profiler.stop()
-    profiler.print()
+    # profiler.stop()
+    # profiler.print()
     print(sample_locations[0].shape)

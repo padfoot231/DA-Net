@@ -596,7 +596,7 @@ class PatchEmbed(nn.Module):
 
         
         # subdiv = 3
-        self.n_radius = 10
+        self.n_radius = 5
         self.n_azimuth = 10
         self.mlp = nn.Linear(self.n_radius*self.n_azimuth*in_chans, embed_dim)
 

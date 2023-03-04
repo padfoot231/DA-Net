@@ -19,6 +19,7 @@ from .cached_image_folder import CachedImageFolder
 from .imagenet22k_dataset import IN22KDATASET
 from .samplers import SubsetRandomSampler
 from .Distorted_imagenet import M_distort
+from .Woodsc import Woodscape_dataset
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -127,8 +128,15 @@ def build_dataset(is_train, config):
             dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'train', transform = transform)
             nb_classes = 200
         else:
-            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'test_3', transform = transform)
+            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'val', transform = transform)
             nb_classes = 200
+    elif config.DATA.DATASET == 'Woodscapes':
+        if is_train:
+            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'train')
+            nb_classes = 10
+        else:
+            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'val')
+            nb_classes = 10
 
     else:
         raise NotImplementedError("We only support ImageNet Now.")

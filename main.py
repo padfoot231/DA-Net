@@ -19,9 +19,13 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torchvision.transforms as T
+from utils import DiceLoss
 
 
-from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
+
+# from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
+from torch.nn.modules.loss import CrossEntropyLoss
+
 from timm.utils import accuracy, AverageMeter
 
 from config import get_config
@@ -108,13 +112,9 @@ def main(config):
     else:
         lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train))
 
-    if config.AUG.MIXUP > 0.:
-        # smoothing is handled with mixup label transform
-        criterion = SoftTargetCrossEntropy()
-    elif config.MODEL.LABEL_SMOOTHING > 0.:
-        criterion = LabelSmoothingCrossEntropy(smoothing=config.MODEL.LABEL_SMOOTHING)
-    else:
-        criterion = torch.nn.CrossEntropyLoss()
+    num_classes = config.MODEL.NUM_CLASSES
+    ce_loss = CrossEntropyLoss()
+    dice_loss = DiceLoss(num_classes)
 
     max_accuracy = 0.0
 
@@ -152,13 +152,13 @@ def main(config):
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
 
-        train_one_epoch(config, model, criterion, data_loader_train, optimizer, epoch, mixup_fn, lr_scheduler,
+        train_one_epoch(config, model, ce_loss, dice_loss, data_loader_train, optimizer, epoch, mixup_fn, lr_scheduler,
                         loss_scaler)
         if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
             save_checkpoint(config, epoch, model_without_ddp, max_accuracy, optimizer, lr_scheduler, loss_scaler,
                             logger)
 
-        acc1, acc5, loss = validate(config, data_loader_val, model)
+        acc1, acc5, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
         # acc1_test, acc5_test, loss_test = test(config, data_loader_test, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%")
         max_accuracy = max(max_accuracy, acc1)
@@ -169,7 +169,7 @@ def main(config):
     logger.info('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, loss_scaler):
+def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, loss_scaler):
     model.train()
     optimizer.zero_grad()
 
@@ -181,18 +181,21 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
 
     start = time.time()
     end = time.time()
-    for idx, (samples, targets, dist, name) in enumerate(data_loader):
+    for idx, (samples, targets, dist) in enumerate(data_loader):
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
         # print(targets)  
-        im = transform(samples[0])
-
-        if mixup_fn is not None:
-            samples, targets = mixup_fn(samples, targets)
+        breakpoint()        
+        # if mixup_fn is not None:
+        #     samples, targets = mixup_fn(samples, targets)
         # print("targets", targets.argmax(1))
-        with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            outputs = model(samples, dist)
-        loss = criterion(outputs, targets)
+        # with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
+        outputs, targets = model(samples, dist, targets)
+
+        
+        loss_ce = ce_loss(outputs, targets[:].long())
+        loss_dice = dice_loss(outputs, targets, softmax=True)
+        loss = 0.4 * loss_ce + 0.6 * loss_dice
         loss = loss / config.TRAIN.ACCUMULATION_STEPS
 
         
@@ -215,7 +218,7 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
         batch_time.update(time.time() - end)
         end = time.time()
 
-        wandb.log({"loss_train" : loss.item(), "epoch" : epoch, "grad":norm_meter.val })
+        wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val })
 
         if idx % config.PRINT_FREQ == 0:
             lr = optimizer.param_groups[0]['lr']
@@ -235,8 +238,8 @@ def train_one_epoch(config, model, criterion, data_loader, optimizer, epoch, mix
 
 
 @torch.no_grad()
-def validate(config, data_loader, model):
-    criterion = torch.nn.CrossEntropyLoss()
+def validate(config, ce_loss, dice_loss, data_loader, model):
+    
     model.eval()
 
     batch_time = AverageMeter()
@@ -248,18 +251,20 @@ def validate(config, data_loader, model):
     running_loss = 0
     running_acc1 = 0
     running_acc5 = 0
-    for idx, (images, target, dist, name) in enumerate(data_loader):
+    for idx, (images, target, dist) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
         # compute output
         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            output = model(images, dist)
+            output, target = model(images, dist, target)
         # for i in range(output.shape[0]):    
         #     data_dic[name[i].split('/')[-1]] = output[i]
         # measure accuracy and record loss
-        loss = criterion(output, target)
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        loss_ce = ce_loss(images, target[:].long())
+        loss_dice = dice_loss(images, target, softmax=True)
+        loss = 0.4 * loss_ce + 0.6 * loss_dice
+        acc1, acc5, _ = accuracy(output, target, topk=(1, 5))
 
         acc1 = reduce_tensor(acc1)
         acc5 = reduce_tensor(acc5)
@@ -296,61 +301,61 @@ def validate(config, data_loader, model):
 
 
 @torch.no_grad()
-def test(config, data_loader, model):
-    criterion = torch.nn.CrossEntropyLoss()
-    model.eval()
+# def test(config, data_loader, model):
+#     criterion = torch.nn.CrossEntropyLoss()
+#     model.eval()
 
-    batch_time = AverageMeter()
-    loss_meter_test = AverageMeter()
-    acc1_meter_test = AverageMeter()
-    acc5_meter_test = AverageMeter()
+#     batch_time = AverageMeter()
+#     loss_meter_test = AverageMeter()
+#     acc1_meter_test = AverageMeter()
+#     acc5_meter_test = AverageMeter()
 
-    end = time.time()
-    running_loss_test = 0
-    running_acc1 = 0
-    running_acc5 = 0
-    for idx, (images, target, dist, name) in enumerate(data_loader):
-        images = images.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+#     end = time.time()
+#     running_loss_test = 0
+#     running_acc1 = 0
+#     running_acc5 = 0
+#     for idx, (images, target, dist, name) in enumerate(data_loader):
+#         images = images.cuda(non_blocking=True)
+#         target = target.cuda(non_blocking=True)
 
-        # compute output
-        with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            output = model(images, dist)
+#         # compute output
+#         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
+#             output = model(images, dist)
 
-        # measure accuracy and record loss
-        loss_test = criterion(output, target)
-        acc1_test, acc5_test = accuracy(output, target, topk=(1, 5))
+#         # measure accuracy and record loss
+#         loss_test = criterion(output, target)
+#         acc1_test, acc5_test = accuracy(output, target, topk=(1, 5))
 
-        acc1_test = reduce_tensor(acc1_test)
-        acc5_test = reduce_tensor(acc5_test)
-        loss_test = reduce_tensor(loss_test)
+#         acc1_test = reduce_tensor(acc1_test)
+#         acc5_test = reduce_tensor(acc5_test)
+#         loss_test = reduce_tensor(loss_test)
 
-        loss_meter_test.update(loss_test.item(), target.size(0))
-        acc1_meter_test.update(acc1_test.item(), target.size(0))
-        acc5_meter_test.update(acc5_test.item(), target.size(0))
-        # wandb.log({"loss_val" : loss.item(), 
-        #             "Acc1" : acc1, 
-        #             "Acc5" : acc5})
+#         loss_meter_test.update(loss_test.item(), target.size(0))
+#         acc1_meter_test.update(acc1_test.item(), target.size(0))
+#         acc5_meter_test.update(acc5_test.item(), target.size(0))
+#         # wandb.log({"loss_val" : loss.item(), 
+#         #             "Acc1" : acc1, 
+#         #             "Acc5" : acc5})
 
-        # measure elapsed time
-        batch_time.update(time.time() - end)
-        end = time.time()
+#         # measure elapsed time
+#         batch_time.update(time.time() - end)
+#         end = time.time()
 
-        if idx % config.PRINT_FREQ == 0:
-            memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
-            logger.info(
-                f'Test: [{idx}/{len(data_loader)}]\t'
-                f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                f'Loss {loss_meter_test.val:.4f} ({loss_meter_test.avg:.4f})\t'
-                f'Acc@1 {acc1_meter_test.val:.3f} ({acc1_meter_test.avg:.3f})\t'
-                f'Acc@5 {acc5_meter_test.val:.3f} ({acc5_meter_test.avg:.3f})\t'
-                f'Mem {memory_used:.0f}MB')
-    logger.info(f' * Acc@1 {acc1_meter_test.avg:.3f} Acc@5 {acc5_meter_test.avg:.3f}')
-    wandb.log({"loss_test_avg" :loss_meter_test.avg, 
-            "Acc1_test_avg" : acc1_meter_test.avg, 
-            "Acc5_test_avg" :  acc5_meter_test.avg})
+#         if idx % config.PRINT_FREQ == 0:
+#             memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+#             logger.info(
+#                 f'Test: [{idx}/{len(data_loader)}]\t'
+#                 f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+#                 f'Loss {loss_meter_test.val:.4f} ({loss_meter_test.avg:.4f})\t'
+#                 f'Acc@1 {acc1_meter_test.val:.3f} ({acc1_meter_test.avg:.3f})\t'
+#                 f'Acc@5 {acc5_meter_test.val:.3f} ({acc5_meter_test.avg:.3f})\t'
+#                 f'Mem {memory_used:.0f}MB')
+#     logger.info(f' * Acc@1 {acc1_meter_test.avg:.3f} Acc@5 {acc5_meter_test.avg:.3f}')
+#     wandb.log({"loss_test_avg" :loss_meter_test.avg, 
+#             "Acc1_test_avg" : acc1_meter_test.avg, 
+#             "Acc5_test_avg" :  acc5_meter_test.avg})
 
-    return acc1_meter_test.avg, acc5_meter_test.avg, loss_meter_test.avg
+#     return acc1_meter_test.avg, acc5_meter_test.avg, loss_meter_test.avg
 
 
 @torch.no_grad()
