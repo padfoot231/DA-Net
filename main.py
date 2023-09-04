@@ -20,6 +20,7 @@ import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torchvision.transforms as T
 from utils import DiceLoss
+from models.build import SwinUnet as ViT_seg
 
 
 
@@ -29,7 +30,6 @@ from torch.nn.modules.loss import CrossEntropyLoss
 from timm.utils import accuracy, AverageMeter
 
 from config import get_config
-from models import build_model
 from data import build_loader
 from lr_scheduler import build_scheduler
 from optimizer import build_optimizer
@@ -54,6 +54,8 @@ def parse_option():
 
     # easy config modification
     parser.add_argument('--batch-size', type=int, help="batch size for single GPU")
+    parser.add_argument('--img-size', type=int, help="image size")
+    parser.add_argument('--num_classes', type=int, help="number of segmentation classes")
     parser.add_argument('--data-path', type=str, help='path to dataset')
     parser.add_argument('--zip', action='store_true', help='use zipped dataset instead of folder dataset')
     parser.add_argument('--cache-mode', type=str, default='part', choices=['no', 'full', 'part'],
@@ -87,13 +89,9 @@ def parse_option():
 
 def main(config):
     dataset_train, dataset_val, data_loader_train, data_loader_val, mixup_fn = build_loader(config)
-    # print(config.MODEL.SWIN.RADIUS_CUTS)
-    # import pdb;pdb.set_trace()
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
-
-    model = build_model(config)
+    model = ViT_seg(config, img_size=args.img_size, num_classes=args.num_classes) 
     logger.info(str(model))
-
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"number of params: {n_parameters}")
     if hasattr(model, 'flops'):
@@ -181,16 +179,13 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
 
     start = time.time()
     end = time.time()
-    for idx, (samples, targets, dist) in enumerate(data_loader):
+    for idx, (samples, targets, dist, cls) in enumerate(data_loader):
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
-        # print(targets)  
-        breakpoint()        
-        # if mixup_fn is not None:
-        #     samples, targets = mixup_fn(samples, targets)
-        # print("targets", targets.argmax(1))
-        # with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-        outputs, targets = model(samples, dist, targets)
+        # dist = dist.cuda(non_blocking=True)
+        cls = cls.cuda(non_blocking=True)
+        # breakpoint()
+        outputs = model(samples, dist, cls)
 
         
         loss_ce = ce_loss(outputs, targets[:].long())
@@ -251,13 +246,15 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
     running_loss = 0
     running_acc1 = 0
     running_acc5 = 0
-    for idx, (images, target, dist) in enumerate(data_loader):
+    for idx, (images, target, dist, cls) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
+        dist = dist.cuda(non_blocking=True)
+        cls = cls.cuda(non_blocking=True)
 
         # compute output
         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            output, target = model(images, dist, target)
+            output = model(images, dist, target, cls)
         # for i in range(output.shape[0]):    
         #     data_dic[name[i].split('/')[-1]] = output[i]
         # measure accuracy and record loss

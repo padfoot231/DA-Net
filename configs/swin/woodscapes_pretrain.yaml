@@ -1,5 +1,5 @@
 MODEL:
-  TYPE: swin_az
+  TYPE: swin_ang
   NAME: woodscapes_pretrain
   DROP_PATH_RATE: 0.2
   SWIN:

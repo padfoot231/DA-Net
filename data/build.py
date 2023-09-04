@@ -132,10 +132,10 @@ def build_dataset(is_train, config):
             nb_classes = 200
     elif config.DATA.DATASET == 'Woodscapes':
         if is_train:
-            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'train')
+            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE)
             nb_classes = 10
         else:
-            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'val')
+            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE)
             nb_classes = 10
 
     else:

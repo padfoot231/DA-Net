@@ -27,7 +27,7 @@ _C.DATA.DATA_PATH = ''
 # Dataset name
 _C.DATA.DATASET = 'Woodscapes'
 # Input image size
-_C.DATA.IMG_SIZE = 128 ##224 
+_C.DATA.IMG_SIZE = 64 ##224 
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
 # Use zipped dataset instead of folder dataset
@@ -76,8 +76,8 @@ _C.MODEL.SWIN.WINDOW_SIZE = (1,16) # change the window size to a tupple
 _C.MODEL.SWIN.MLP_RATIO = 4.
 _C.MODEL.SWIN.QKV_BIAS = True
 _C.MODEL.SWIN.QK_SCALE = None
-_C.MODEL.SWIN.RADIUS_CUTS = 32
-_C.MODEL.SWIN.AZIMUTH_CUTS = 128
+_C.MODEL.SWIN.RADIUS_CUTS = 16
+_C.MODEL.SWIN.AZIMUTH_CUTS = 64
 _C.MODEL.SWIN.APE = False
 _C.MODEL.SWIN.PATCH_NORM = True
 _C.MODEL.SWIN.FINAL_UPSAMPLE= "expand_first"
@@ -95,7 +95,8 @@ _C.MODEL.SWIN_MLP.WINDOW_SIZE = 4 ## 7
 _C.MODEL.SWIN_MLP.MLP_RATIO = 4.
 _C.MODEL.SWIN_MLP.APE = False
 _C.MODEL.SWIN_MLP.PATCH_NORM = True
-
+_C.MODEL.NRADIUS = 4
+_C.MODEL.NAZIMUTH = 4
 # -----------------------------------------------------------------------------
 # Training settings
 # -----------------------------------------------------------------------------
@@ -222,6 +223,11 @@ def update_config(config, args):
 
 
     # merge from specific arguments
+    
+    if args.num_classes:
+        config.MODEL.NUM_CLASSES = args.num_classes
+    if args.img_size:
+        config.DATA.IMG_SIZE = args.img_size
     if args.batch_size:
         config.DATA.BATCH_SIZE = args.batch_size
     if args.data_path:
