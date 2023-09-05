@@ -105,7 +105,7 @@ _C.TRAIN.START_EPOCH = 0
 _C.TRAIN.EPOCHS = 600
 _C.TRAIN.WARMUP_EPOCHS = 20
 _C.TRAIN.WEIGHT_DECAY = 0.05
-_C.TRAIN.BASE_LR = 5e-4
+_C.TRAIN.BASE_LR = 0.05
 _C.TRAIN.WARMUP_LR = 5e-7
 _C.TRAIN.MIN_LR = 5e-6
 # Clip gradient norm
@@ -244,6 +244,8 @@ def update_config(config, args):
         config.TRAIN.ACCUMULATION_STEPS = args.accumulation_steps
     if args.use_checkpoint:
         config.TRAIN.USE_CHECKPOINT = True
+    if args.base_lr:
+        config.TRAIN.BASE_LR = 0.05
     if args.amp_opt_level:
         config.AMP_OPT_LEVEL = args.amp_opt_level
     if args.output:

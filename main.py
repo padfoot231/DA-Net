@@ -21,6 +21,8 @@ import torch.distributed as dist
 import torchvision.transforms as T
 from utils import DiceLoss
 from models.build import SwinUnet as ViT_seg
+from torch import optim as optim
+
 
 
 
@@ -76,6 +78,7 @@ def parse_option():
     parser.add_argument('--tag', help='tag of experiment')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--throughput', action='store_true', help='Test throughput only')
+    parser.add_argument('--base_lr', type=float, help="base learning rate")
 
     # distributed training
     parser.add_argument("--local_rank", type=int, required=True, help='local rank for DistributedDataParallel')
@@ -88,6 +91,7 @@ def parse_option():
 
 
 def main(config):
+    base_lr = config.TRAIN.BASE_LR
     dataset_train, dataset_val, data_loader_train, data_loader_val, mixup_fn = build_loader(config)
     logger.info(f"Creating model:{config.MODEL.TYPE}/{config.MODEL.NAME}")
     model = ViT_seg(config, img_size=args.img_size, num_classes=args.num_classes) 
@@ -100,15 +104,16 @@ def main(config):
 
     model.cuda()
     model_without_ddp = model
-
-    optimizer = build_optimizer(config, model)
+    # breakpoint()
+    optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+    # optimizer = build_optimizer(config, model)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
     loss_scaler = NativeScalerWithGradNormCount()
 
-    if config.TRAIN.ACCUMULATION_STEPS > 1:
-        lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train) // config.TRAIN.ACCUMULATION_STEPS)
-    else:
-        lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train))
+    # if config.TRAIN.ACCUMULATION_STEPS > 1:
+    #     lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train) // config.TRAIN.ACCUMULATION_STEPS)
+    # else:
+    #     lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train))
 
     num_classes = config.MODEL.NUM_CLASSES
     ce_loss = CrossEntropyLoss()
@@ -130,7 +135,7 @@ def main(config):
 
 
     if config.MODEL.RESUME:
-        max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, loss_scaler, logger)
+        max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, loss_scaler, logger)
         acc1, acc5, loss = validate(config, data_loader_val, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%")
         if config.EVAL_MODE:
@@ -150,10 +155,10 @@ def main(config):
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
 
-        train_one_epoch(config, model, ce_loss, dice_loss, data_loader_train, optimizer, epoch, mixup_fn, lr_scheduler,
+        train_one_epoch(config, model, ce_loss, dice_loss, data_loader_train, optimizer, epoch, mixup_fn,
                         loss_scaler)
         if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
-            save_checkpoint(config, epoch, model_without_ddp, max_accuracy, optimizer, lr_scheduler, loss_scaler,
+            save_checkpoint(config, epoch, model_without_ddp, max_accuracy, optimizer, loss_scaler,
                             logger)
 
         acc1, acc5, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
@@ -167,7 +172,7 @@ def main(config):
     logger.info('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, loss_scaler):
+def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, epoch, mixup_fn, loss_scaler):
     model.train()
     optimizer.zero_grad()
 
@@ -176,7 +181,8 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
     loss_meter = AverageMeter()
     norm_meter = AverageMeter()
     scaler_meter = AverageMeter()
-
+    iter_num = 0
+    max_iterations = config.TRAIN.EPOCHS*num_steps
     start = time.time()
     end = time.time()
     for idx, (samples, targets, dist, cls) in enumerate(data_loader):
@@ -184,10 +190,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         targets = targets.cuda(non_blocking=True)
         # dist = dist.cuda(non_blocking=True)
         cls = cls.cuda(non_blocking=True)
-        # breakpoint()
         outputs = model(samples, dist, cls)
-
-        
         loss_ce = ce_loss(outputs, targets[:].long())
         loss_dice = dice_loss(outputs, targets, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
@@ -199,9 +202,10 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         grad_norm = loss_scaler(loss, optimizer, clip_grad=config.TRAIN.CLIP_GRAD,
                                 parameters=model.parameters(), create_graph=is_second_order,
                                 update_grad=(idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0)
-        if (idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0:
-            optimizer.zero_grad()
-            lr_scheduler.step_update((epoch * num_steps + idx) // config.TRAIN.ACCUMULATION_STEPS)
+        # if (idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0:
+        #     optimizer.zero_grad()
+        #     lr_scheduler.step_update((epoch * num_steps + idx) // config.TRAIN.ACCUMULATION_STEPS)
+        lr_ = config.TRAIN.BASE_LR * (1.0 - iter_num / max_iterations) ** 0.9
         loss_scale_value = loss_scaler.state_dict()["scale"]
 
         torch.cuda.synchronize()
@@ -378,6 +382,9 @@ def throughput(data_loader, model, logger):
 if __name__ == '__main__':
     args, config = parse_option()
 
+    if args.batch_size != 24 and args.batch_size % 6 == 0:
+        args.base_lr *= args.batch_size / 24
+
     if config.AMP_OPT_LEVEL:
         print("[warning] Apex amp has been deprecated, please use pytorch amp instead!")
 
@@ -403,19 +410,20 @@ if __name__ == '__main__':
     cudnn.benchmark = True
 
     # linear scale the learning rate according to total batch size, may not be optimal
-    linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
-    linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
-    linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    # if args.batch_size != 24 and args.batch_size % 6 == 0:
+    linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0 ## change it based on the scheduler performance
+    # linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    # linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
     # gradient accumulation also need to scale the learning rate
     if config.TRAIN.ACCUMULATION_STEPS > 1:
         linear_scaled_lr = linear_scaled_lr * config.TRAIN.ACCUMULATION_STEPS
-        linear_scaled_warmup_lr = linear_scaled_warmup_lr * config.TRAIN.ACCUMULATION_STEPS
-        linear_scaled_min_lr = linear_scaled_min_lr * config.TRAIN.ACCUMULATION_STEPS
+        # linear_scaled_warmup_lr = linear_scaled_warmup_lr * config.TRAIN.ACCUMULATION_STEPS
+        # linear_scaled_min_lr = linear_scaled_min_lr * config.TRAIN.ACCUMULATION_STEPS
     
     config.defrost()
     config.TRAIN.BASE_LR = linear_scaled_lr
-    config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr
-    config.TRAIN.MIN_LR = linear_scaled_min_lr
+    # config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr
+    # config.TRAIN.MIN_LR = linear_scaled_min_lr
     config.freeze()
 
     os.makedirs(config.OUTPUT, exist_ok=True)
