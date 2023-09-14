@@ -42,7 +42,7 @@ from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScale
 transform = T.ToPILImage()
 data_dic = {}
 
-wandb.init(project="Distortion", entity='padfoot')
+wandb.init(project="semantic segmantation", entity='padfoot')
 # run_name = wandb.run.name
 def parse_option():
     parser = argparse.ArgumentParser('Swin Transformer training and evaluation script', add_help=False)
@@ -110,10 +110,10 @@ def main(config):
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
     loss_scaler = NativeScalerWithGradNormCount()
 
-    # if config.TRAIN.ACCUMULATION_STEPS > 1:
-    #     lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train) // config.TRAIN.ACCUMULATION_STEPS)
-    # else:
-    #     lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train))
+    if config.TRAIN.ACCUMULATION_STEPS > 1:
+        lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train) // config.TRAIN.ACCUMULATION_STEPS)
+    else:
+        lr_scheduler = build_scheduler(config, optimizer, len(data_loader_train))
 
     num_classes = config.MODEL.NUM_CLASSES
     ce_loss = CrossEntropyLoss()
@@ -135,7 +135,7 @@ def main(config):
 
 
     if config.MODEL.RESUME:
-        max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, loss_scaler, logger)
+        max_accuracy = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, loss_scaler, logger)
         acc1, acc5, loss = validate(config, data_loader_val, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {acc1:.1f}%")
         if config.EVAL_MODE:
@@ -155,10 +155,10 @@ def main(config):
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
 
-        train_one_epoch(config, model, ce_loss, dice_loss, data_loader_train, optimizer, epoch, mixup_fn,
+        train_one_epoch(config, model, ce_loss, dice_loss, data_loader_train, optimizer, epoch, mixup_fn,lr_scheduler,
                         loss_scaler)
         if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
-            save_checkpoint(config, epoch, model_without_ddp, max_accuracy, optimizer, loss_scaler,
+            save_checkpoint(config, epoch, model_without_ddp, max_accuracy, optimizer, lr_scheduler, loss_scaler,
                             logger)
 
         acc1, acc5, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
@@ -172,7 +172,7 @@ def main(config):
     logger.info('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, epoch, mixup_fn, loss_scaler):
+def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, loss_scaler):
     model.train()
     optimizer.zero_grad()
 
@@ -188,24 +188,22 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
     for idx, (samples, targets, dist, cls) in enumerate(data_loader):
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
-        # dist = dist.cuda(non_blocking=True)
+        # dist = dist.cuda(non_blocking=True)   
         cls = cls.cuda(non_blocking=True)
         outputs = model(samples, dist, cls)
         loss_ce = ce_loss(outputs, targets[:].long())
         loss_dice = dice_loss(outputs, targets, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
         loss = loss / config.TRAIN.ACCUMULATION_STEPS
-
-        
         # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         grad_norm = loss_scaler(loss, optimizer, clip_grad=config.TRAIN.CLIP_GRAD,
                                 parameters=model.parameters(), create_graph=is_second_order,
                                 update_grad=(idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0)
-        # if (idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0:
-        #     optimizer.zero_grad()
-        #     lr_scheduler.step_update((epoch * num_steps + idx) // config.TRAIN.ACCUMULATION_STEPS)
-        lr_ = config.TRAIN.BASE_LR * (1.0 - iter_num / max_iterations) ** 0.9
+        if (idx + 1) % config.TRAIN.ACCUMULATION_STEPS == 0:
+            optimizer.zero_grad()
+            lr_scheduler.step_update((epoch * num_steps + idx) // config.TRAIN.ACCUMULATION_STEPS)
+        # lr = config.TRAIN.BASE_LR * (1.0 - iter_num / max_iterations) ** 0.9
         loss_scale_value = loss_scaler.state_dict()["scale"]
 
         torch.cuda.synchronize()
@@ -217,7 +215,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         batch_time.update(time.time() - end)
         end = time.time()
 
-        wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val })
+        # wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val })
 
         if idx % config.PRINT_FREQ == 0:
             lr = optimizer.param_groups[0]['lr']
@@ -232,6 +230,8 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
                 f'grad_norm {norm_meter.val:.4f} ({norm_meter.avg:.4f})\t'
                 f'loss_scale {scaler_meter.val:.4f} ({scaler_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
+        wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val, 'lr':lr })
+
     epoch_time = time.time() - start
     logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
 
@@ -258,22 +258,23 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
 
         # compute output
         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            output = model(images, dist, target, cls)
+            output = model(images, dist, cls)
+        # breakpoint()
         # for i in range(output.shape[0]):    
         #     data_dic[name[i].split('/')[-1]] = output[i]
         # measure accuracy and record loss
-        loss_ce = ce_loss(images, target[:].long())
-        loss_dice = dice_loss(images, target, softmax=True)
+        loss_ce = ce_loss(output, target[:].long())
+        loss_dice = dice_loss(output, target, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
-        acc1, acc5, _ = accuracy(output, target, topk=(1, 5))
+        # acc1, acc5 = accuracy(output, target, topk=(1, 5))
 
-        acc1 = reduce_tensor(acc1)
-        acc5 = reduce_tensor(acc5)
+        # acc1 = reduce_tensor(acc1)
+        # acc5 = reduce_tensor(acc5)
         loss = reduce_tensor(loss)
 
         loss_meter.update(loss.item(), target.size(0))
-        acc1_meter.update(acc1.item(), target.size(0))
-        acc5_meter.update(acc5.item(), target.size(0))
+        # acc1_meter.update(acc1.item(), target.size(0))
+        # acc5_meter.update(acc5.item(), target.size(0))
         # wandb.log({"loss_val" : loss.item(), 
         #             "Acc1" : acc1, 
         #             "Acc5" : acc5})
@@ -288,12 +289,10 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
                 f'Test: [{idx}/{len(data_loader)}]\t'
                 f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                 f'Loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
-                f'Acc@1 {acc1_meter.val:.3f} ({acc1_meter.avg:.3f})\t'
-                f'Acc@5 {acc5_meter.val:.3f} ({acc5_meter.avg:.3f})\t'
                 f'Mem {memory_used:.0f}MB')
     # with open('/home-local2/akath.extra.nobkp/rad_gp4_gp4.pkl', 'wb') as f:
     #     pkl.dump(data_dic, f)
-    logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
+    # logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
     wandb.log({"loss_val" :loss_meter.avg, 
             "Acc1" : acc1_meter.avg, 
             "Acc5" :  acc5_meter.avg})
@@ -412,18 +411,18 @@ if __name__ == '__main__':
     # linear scale the learning rate according to total batch size, may not be optimal
     # if args.batch_size != 24 and args.batch_size % 6 == 0:
     linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0 ## change it based on the scheduler performance
-    # linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
-    # linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
+    linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
     # gradient accumulation also need to scale the learning rate
     if config.TRAIN.ACCUMULATION_STEPS > 1:
         linear_scaled_lr = linear_scaled_lr * config.TRAIN.ACCUMULATION_STEPS
-        # linear_scaled_warmup_lr = linear_scaled_warmup_lr * config.TRAIN.ACCUMULATION_STEPS
-        # linear_scaled_min_lr = linear_scaled_min_lr * config.TRAIN.ACCUMULATION_STEPS
+        linear_scaled_warmup_lr = linear_scaled_warmup_lr * config.TRAIN.ACCUMULATION_STEPS
+        linear_scaled_min_lr = linear_scaled_min_lr * config.TRAIN.ACCUMULATION_STEPS
     
     config.defrost()
     config.TRAIN.BASE_LR = linear_scaled_lr
-    # config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr
-    # config.TRAIN.MIN_LR = linear_scaled_min_lr
+    config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr
+    config.TRAIN.MIN_LR = linear_scaled_min_lr
     config.freeze()
 
     os.makedirs(config.OUTPUT, exist_ok=True)
