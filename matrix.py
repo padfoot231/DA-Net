@@ -13,7 +13,7 @@ dtype = torch.float32 if use_cuda else torch.float64
 device_id = "cuda:0" if use_cuda else "cpu"
 # from utils import get_sample_params_from_subdiv, get_sample_locations
 import numpy as np
-from utils import get_sample_params_from_subdiv, get_sample_locations, distort_image
+from utils import get_sample_params_from_subdiv, distort_image
 from torchvision.transforms import transforms
 t2pil = transforms.ToTensor()
 pil = transforms.ToPILImage()
@@ -68,7 +68,7 @@ with open('/home-local2/akath.extra.nobkp/woodscapes/calib.pkl', 'rb') as f:
 
 key = list(data.keys())
 
-H, W = 64, 64
+H, W = 128, 128
 x = torch.linspace(0, H, H+1) - H//2 + 0.5
 y = torch.linspace(0, W, W+1) - W//2 + 0.5
 grid_x, grid_y = torch.meshgrid(x[1:], y[1:])
@@ -77,33 +77,38 @@ y_ = grid_y.reshape(H*W, 1)
 grid_pix = torch.cat((x_, y_), dim=1)
 grid_pix = grid_pix.reshape(1, H*W, 2).cuda("cuda:0")
 
+key = [[1.0, 0.0, 0.0, 0.0]]
+
 for i in range(len(key)):
     print(i)
-    D = torch.tensor(data[key[i]].reshape(1,4).transpose(1,0)).cuda("cuda:0")
+    # D = torch.tensor(data[key[i]].reshape(1,4).transpose(1,0)).cuda("cuda:0")
+    D = np.array([1.0, 0.0, 0.0, 0.0])
+    D = torch.tensor(D.reshape(1,4).transpose(1,0)).cuda("cuda:0")
+    
     
     azimuth_subdiv = H
     radius_subdiv = W//4
-    subdiv = (radius_subdiv, azimuth_subdiv)
-    # subdiv = 3
     n_radius = 4
     n_azimuth = 4
-    img_size = (64, 64)
+    subdiv = (radius_subdiv*n_radius, azimuth_subdiv*n_azimuth)
+    # subdiv = 3
+
+    img_size = (H, W)
     radius_buffer, azimuth_buffer = 0, 0
-    params, D_s = get_sample_params_from_subdiv(
+    xc, yc, theta_max = get_sample_params_from_subdiv(
         subdiv=subdiv,
         img_size=img_size,
+        distortion_model = 'polynomial',
         D = D, 
         n_radius=n_radius,
         n_azimuth=n_azimuth,
         radius_buffer=radius_buffer,
-        azimuth_buffer=azimuth_buffer, 
-        distortion_model = 'polynomial')
-
-    sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
-    B, n_p, n_s = sample_locations[0].shape
-    x = sample_locations[0].reshape(1, 1, -1).transpose(1,2).cuda("cuda:0")
+        azimuth_buffer=azimuth_buffer)
+    
+    B, n_p, n_s = xc.shape
+    x = xc.reshape(1, 1, -1).transpose(1,2).cuda("cuda:0")
     # x = torch.repeat_interleave(x, 2, 0).cuda("cuda:2")
-    y = sample_locations[1].reshape(1, 1, -1).transpose(1,2).cuda("cuda:0")
+    y = yc.reshape(1, 1, -1).transpose(1,2).cuda("cuda:0")
     # y = torch.repeat_interleave(y, 2, 0).cuda("cuda:2")
 #     out = torch.cat((y_, x_), dim = 3)
     grid_ = torch.cat((x, y), dim=2)
@@ -114,7 +119,7 @@ for i in range(len(key)):
     # cl = np.array(cl.cpu())
     cl = cl[0].cpu()
     # breakpoint()
-    np.save('/home-local2/akath.extra.nobkp/woodscapes/index_16s_1k/' + key[i][:-4], cl)
+    np.save('/home-local2/akath.extra.nobkp/cityscapes/key_4t4_1.pkl', cl)
     print(i)
 
 

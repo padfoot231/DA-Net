@@ -20,6 +20,7 @@ from .imagenet22k_dataset import IN22KDATASET
 from .samplers import SubsetRandomSampler
 from .Distorted_imagenet import M_distort
 from .Woodsc import Woodscape_dataset
+from .cityscapes import Cityscape_dataset
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -137,6 +138,13 @@ def build_dataset(is_train, config):
         else:
             dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE)
             nb_classes = 10
+    elif config.DATA.DATASET == 'Cityscapes':
+        if is_train:
+            dataset = Cityscape_dataset(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE)
+            nb_classes = 34
+        else:
+            dataset = Cityscape_dataset(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE)
+            nb_classes = 34
 
     else:
         raise NotImplementedError("We only support ImageNet Now.")

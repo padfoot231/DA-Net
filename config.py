@@ -25,9 +25,9 @@ _C.DATA.BATCH_SIZE = 32
 # Path to dataset, could be overwritten by command line argument
 _C.DATA.DATA_PATH = ''
 # Dataset name
-_C.DATA.DATASET = 'Woodscapes'
+_C.DATA.DATASET = 'Cityscapes'
 # Input image size
-_C.DATA.IMG_SIZE = 64 ##224 
+_C.DATA.IMG_SIZE = 128 ##224 
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
 # Use zipped dataset instead of folder dataset
@@ -76,8 +76,8 @@ _C.MODEL.SWIN.WINDOW_SIZE = (1, 16) # change the window size to a tupple
 _C.MODEL.SWIN.MLP_RATIO = 4.
 _C.MODEL.SWIN.QKV_BIAS = True
 _C.MODEL.SWIN.QK_SCALE = None
-_C.MODEL.SWIN.RADIUS_CUTS = 16
-_C.MODEL.SWIN.AZIMUTH_CUTS = 64
+_C.MODEL.SWIN.RADIUS_CUTS = 32
+_C.MODEL.SWIN.AZIMUTH_CUTS = 128
 _C.MODEL.SWIN.APE = False
 _C.MODEL.SWIN.PATCH_NORM = True
 _C.MODEL.SWIN.FINAL_UPSAMPLE= "expand_first"

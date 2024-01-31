@@ -184,30 +184,23 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
     max_iterations = config.TRAIN.EPOCHS*num_steps
     start = time.time()
     end = time.time()
-    for idx, (samples, targets, dist, cls) in enumerate(data_loader):
+    for idx, (samples, targets, dist, cls, mask, one_hot) in enumerate(data_loader):
 
-        #################
-        res = 64
-        cartesian = torch.cartesian_prod(
-            torch.linspace(-1, 1, res),
-            torch.linspace(1, -1, res)
-        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
-        radius = cartesian.norm(dim=0)
-        mask = (radius > 0.0) & (radius < 1).unsqueeze(0)
-        # mask = mask.repeat_interleave(1, dim=1)
+
         ###############
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
         # dist = dist.cuda(non_blocking=True)   
         cls = cls.cuda(non_blocking=True)
+        mask = mask.cuda(non_blocking=True)
+        one_hot = one_hot.cuda(non_blocking=True)
+        # breakpoint()
         outputs = model(samples, dist, cls)
         B, _, _, _ = samples.shape
-        # breakpoint() 
-        # t = F.one_hot(targets, num_classes=10).transpose(2, 3).transpose(1, 2).float()
-        mask = mask.repeat_interleave(B, dim=0)
-        outputs[:, 0][~mask] = 10000
-        # outputs[~] = t
-        # breakpoint()
+        one_hot = one_hot.transpose(2, 3).transpose(1, 2)
+        outputs[:, :, mask[0] == 0] = one_hot[:, :, mask[0] == 0]
+        
+        
         loss_ce = ce_loss(outputs, targets[:].long())
         loss_dice = dice_loss(outputs, targets, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
@@ -267,30 +260,23 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
     running_loss = 0
     running_acc1 = 0
     running_acc5 = 0
-    for idx, (images, target, dist, cls) in enumerate(data_loader):
-        res = 64
-        cartesian = torch.cartesian_prod(
-            torch.linspace(-1, 1, res),
-            torch.linspace(1, -1, res)
-        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
-        radius = cartesian.norm(dim=0)
-        mask = (radius > 0.0) & (radius < 1).unsqueeze(0)
+    for idx, (images, target, dist, cls, mask, one_hot) in enumerate(data_loader):
 
 
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         dist = dist.cuda(non_blocking=True)
         cls = cls.cuda(non_blocking=True)
-
+        mask = mask.cuda(non_blocking=True)
+        one_hot = one_hot.cuda(non_blocking=True)
         # compute output
-        with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-            output = model(images, dist, cls)
-        # breakpoint()
+        # with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
+        output = model(images, dist, cls)
+            
         B, _, _, _ = images.shape
-        mask = mask.repeat_interleave(B, dim=0)
-        output[:, 0][~mask] = 10000
-        # for i in range(output.shape[0]):    
-        #     data_dic[name[i].split('/')[-1]] = output[i]
+        one_hot = one_hot.transpose(2, 3).transpose(1, 2)
+        output[:, :, mask[0] == 0] = one_hot[:, :, mask[0] == 0]
+
         # measure accuracy and record loss
         loss_ce = ce_loss(output, target[:].long())
         loss_dice = dice_loss(output, target, softmax=True)

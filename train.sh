@@ -7,5 +7,5 @@ python -m torch.distributed.launch \
 --master_port 12345  main.py \
 --cfg configs/swin/woodscapes_pretrain.yaml \
 --output /home-local2/akath.extra.nobkp/Radial-unet \
---data-path /home-local2/akath.extra.nobkp/woodscapes \
+--data-path /home-local2/akath.extra.nobkp/cityscapes \
 --batch-size 8
