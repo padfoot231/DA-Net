@@ -22,7 +22,7 @@ import torchvision.transforms as T
 from utils import DiceLoss
 from models.build import SwinUnet as ViT_seg
 from torch import optim as optim
-
+import torch.nn.functional as F
 
 
 
@@ -175,7 +175,6 @@ def main(config):
 def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, loss_scaler):
     model.train()
     optimizer.zero_grad()
-
     num_steps = len(data_loader)
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
@@ -186,11 +185,29 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
     start = time.time()
     end = time.time()
     for idx, (samples, targets, dist, cls) in enumerate(data_loader):
+
+        #################
+        res = 64
+        cartesian = torch.cartesian_prod(
+            torch.linspace(-1, 1, res),
+            torch.linspace(1, -1, res)
+        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+        radius = cartesian.norm(dim=0)
+        mask = (radius > 0.0) & (radius < 1).unsqueeze(0)
+        # mask = mask.repeat_interleave(1, dim=1)
+        ###############
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
         # dist = dist.cuda(non_blocking=True)   
         cls = cls.cuda(non_blocking=True)
         outputs = model(samples, dist, cls)
+        B, _, _, _ = samples.shape
+        # breakpoint() 
+        # t = F.one_hot(targets, num_classes=10).transpose(2, 3).transpose(1, 2).float()
+        mask = mask.repeat_interleave(B, dim=0)
+        outputs[:, 0][~mask] = 10000
+        # outputs[~] = t
+        # breakpoint()
         loss_ce = ce_loss(outputs, targets[:].long())
         loss_dice = dice_loss(outputs, targets, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
@@ -251,6 +268,15 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
     running_acc1 = 0
     running_acc5 = 0
     for idx, (images, target, dist, cls) in enumerate(data_loader):
+        res = 64
+        cartesian = torch.cartesian_prod(
+            torch.linspace(-1, 1, res),
+            torch.linspace(1, -1, res)
+        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+        radius = cartesian.norm(dim=0)
+        mask = (radius > 0.0) & (radius < 1).unsqueeze(0)
+
+
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         dist = dist.cuda(non_blocking=True)
@@ -260,6 +286,9 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
         with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
             output = model(images, dist, cls)
         # breakpoint()
+        B, _, _, _ = images.shape
+        mask = mask.repeat_interleave(B, dim=0)
+        output[:, 0][~mask] = 10000
         # for i in range(output.shape[0]):    
         #     data_dic[name[i].split('/')[-1]] = output[i]
         # measure accuracy and record loss
@@ -410,17 +439,17 @@ if __name__ == '__main__':
 
     # linear scale the learning rate according to total batch size, may not be optimal
     # if args.batch_size != 24 and args.batch_size % 6 == 0:
-    linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0 ## change it based on the scheduler performance
+    # linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0 ## change it based on the scheduler performance
     linear_scaled_warmup_lr = config.TRAIN.WARMUP_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
     linear_scaled_min_lr = config.TRAIN.MIN_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0
     # gradient accumulation also need to scale the learning rate
     if config.TRAIN.ACCUMULATION_STEPS > 1:
-        linear_scaled_lr = linear_scaled_lr * config.TRAIN.ACCUMULATION_STEPS
+        linear_scaled_lr = config.TRAIN.BASE_LR * config.TRAIN.ACCUMULATION_STEPS
         linear_scaled_warmup_lr = linear_scaled_warmup_lr * config.TRAIN.ACCUMULATION_STEPS
         linear_scaled_min_lr = linear_scaled_min_lr * config.TRAIN.ACCUMULATION_STEPS
     
     config.defrost()
-    config.TRAIN.BASE_LR = linear_scaled_lr
+    config.TRAIN.BASE_LR = config.TRAIN.BASE_LR
     config.TRAIN.WARMUP_LR = linear_scaled_warmup_lr
     config.TRAIN.MIN_LR = linear_scaled_min_lr
     config.freeze()

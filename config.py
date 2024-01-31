@@ -67,12 +67,12 @@ _C.MODEL.LABEL_SMOOTHING = 0.1
 
 # Swin Transformer parameters
 _C.MODEL.SWIN = CN()
-_C.MODEL.SWIN.PATCH_SIZE = 4 # original swin 4
+_C.MODEL.SWIN.PATCH_SIZE = 2 # original swin 4
 _C.MODEL.SWIN.IN_CHANS = 3
 _C.MODEL.SWIN.EMBED_DIM = 96
 _C.MODEL.SWIN.DEPTHS = [2, 2, 6, 2]
 _C.MODEL.SWIN.NUM_HEADS = [3, 6, 12, 24]
-_C.MODEL.SWIN.WINDOW_SIZE = (1,16) # change the window size to a tupple
+_C.MODEL.SWIN.WINDOW_SIZE = (1, 16) # change the window size to a tupple
 _C.MODEL.SWIN.MLP_RATIO = 4.
 _C.MODEL.SWIN.QKV_BIAS = True
 _C.MODEL.SWIN.QK_SCALE = None
@@ -121,7 +121,7 @@ _C.TRAIN.USE_CHECKPOINT = False
 
 # LR scheduler
 _C.TRAIN.LR_SCHEDULER = CN()
-_C.TRAIN.LR_SCHEDULER.NAME = 'cosine'
+_C.TRAIN.LR_SCHEDULER.NAME = 'linear'
 # Epoch interval to decay LR, used in StepLRScheduler
 _C.TRAIN.LR_SCHEDULER.DECAY_EPOCHS = 30
 # LR decay rate, used in StepLRScheduler
