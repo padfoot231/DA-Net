@@ -21,6 +21,7 @@ from .samplers import SubsetRandomSampler
 from .Distorted_imagenet import M_distort
 from .Woodsc import Woodscape_dataset
 from .cityscapes import Cityscape_dataset
+from .CVRG_pano import CVRG
 
 try:
     from torchvision.transforms import InterpolationMode
@@ -145,6 +146,13 @@ def build_dataset(is_train, config):
         else:
             dataset = Cityscape_dataset(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE)
             nb_classes = 34
+    elif config.DATA.DATASET == 'CVRG':
+        if is_train:
+            dataset = CVRG(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE, fov = config.DATA.FOV, xi = config.DATA.XI)
+            nb_classes = 20
+        else:
+            dataset = CVRG(config.DATA.DATA_PATH, split = 'test', img_size=config.DATA.IMG_SIZE, fov = config.DATA.FOV, xi = config.DATA.XI)
+            nb_classes = 20
 
     else:
         raise NotImplementedError("We only support ImageNet Now.")

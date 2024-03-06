@@ -11,11 +11,16 @@ from torch.utils.data import DataLoader
 import json
 from PIL import Image
 import pickle as pkl
+import torch.nn.functional as F
+
 # Transpose.FLIP_LEFT_RIGHT 
 
+T = transforms.ToTensor()
+
+
 normalize = transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225])
+            mean=[0.2151, 0.2235, 0.2283],
+            std=[0.2300, 0.2334, 0.2419])
 
 def imresize(im, size, interp='bilinear'):
     if interp == 'nearest':
@@ -48,9 +53,9 @@ def random_rotate(image, label):
 
 def img_transform(img):
     # 0-255 to 0-1
-    img = np.float32(np.array(img)) / 255.
+    img = np.float32(np.array(img))
     img = img.transpose((2, 0, 1))
-    img = normalize(torch.from_numpy(img.copy()))
+    # img = normalize(torch.from_numpy(img.copy()))
     return img
 
 def segm_transform(segm):
@@ -89,7 +94,7 @@ class RandomGenerator(object):
 
 
 class Woodscape_dataset(Dataset):
-    def __init__(self, base_dir, split, img_size, transform=None):
+    def __init__(self, base_dir, split, img_size = 128, transform=None):
         self.transform = transform  # using transform in torch!
         self.split = split
         
@@ -115,10 +120,10 @@ class Woodscape_dataset(Dataset):
     def __getitem__(self, idx):
         img_path = self.data_dir + '/rgb_images/' + self.data[idx]
         lbl_path = self.data_dir + '/gtLabels/' + self.data[idx]
-        mat_path = self.data_dir + '/index_16s_1k/' + self.data[idx][:-4] + '_img.npy'
+        mat_path = self.data_dir + '/matrix_20/'+ '20_20_' + self.data[idx] + '.pkl.npy'
         img = Image.open(img_path).convert('RGB')
         segm = Image.open(lbl_path).convert('L')
-        key = self.data[idx][:-4] + '_img' + '.png'
+        key = self.data[idx]
         cls = np.load(mat_path)
 
         dist = self.calib[key].astype(np.float32)
@@ -127,31 +132,69 @@ class Woodscape_dataset(Dataset):
         assert(img.size[1] == segm.size[1])
 
             # random_flip
-        if np.random.choice([0, 1]):
-            img = img.transpose(Image.FLIP_LEFT_RIGHT)
-            segm = segm.transpose(Image.FLIP_LEFT_RIGHT)
+        # if np.random.choice([0, 1]):
+        #     img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        #     segm = segm.transpose(Image.FLIP_LEFT_RIGHT)
 
         # import pdb;pdb.set_trace()
         # note that each sample within a mini batch has different scale param
         img = imresize(img, (self.img_size, self.img_size), interp='bilinear')
         segm = imresize(segm, (self.img_size,self.img_size), interp='nearest')
 
-        # image transform, to torch float tensor 3xHxW
-        img = img_transform(img)
+        image = T(img)
+        label = segm_transform(segm)
 
-        # segm transform, to torch long tensor HxW
-        segm = segm_transform(segm)
+        ############################################# masks ############################################################
+        res = 1024
+        cartesian = torch.cartesian_prod(
+            torch.linspace(-1, 1, res),
+            torch.linspace(1, -1, res)
+        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+        radius = cartesian.norm(dim=0)
+        mask = (radius > 0.0) & (radius < 1) 
+        mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (self.img_size), mode="nearest")
+        ############################################# masks ############################################################
 
+        sample = {'image': image, 'label': label}
+        if self.transform:
+            sample = self.transform(sample)
+        else:
+            sample['image']= image.type(torch.float32)
+            sample['label']= label.type(torch.uint8)
+        one_hot = F.one_hot(sample['label'].to(torch.int64), num_classes=10).to(torch.float32)
+        sample['dist'] = dist
+        if normalize is not None:
+            sample['image']= normalize(sample['image'])
+        sample['one_hot'] = one_hot
+        sample['mask'] = mask1[0].to(torch.long)
         # sample = {'image': img, 'label': segm, 'dist':dist, 'class':cls}
-        return img, segm, dist, cls
+        return sample['image'], sample['label'], sample['dist'] , cls, sample['mask'], one_hot
+
+def get_mean_std(base_dir ):
+    db= Woodscape_dataset(base_dir, split="train", transform=None)
+    print(len(db))
+    #sample= db.__getitem__(0)
+    #print(sample['image'].shape)
+    #print(sample['label'].shape)
+    #print(sample['dist'].shape)
+    loader = DataLoader(db, batch_size=len(db), shuffle=False,num_workers=0)
+    im_lab_dict = next(iter(loader))
+    images, labels, dist, cls, mask, one_hot = im_lab_dict
+    # shape of images = [b,c,w,h]
+    mean, std = images.mean([0,2,3]), images.std([0,2,3])
+    print("mean",mean)
+    print("std", std)
+    return mean , std
+
 
 
 if __name__=='__main__':
-    db_train = Woodscape_dataset(base_dir="/home-local2/akath.extra.nobkp/woodscapes", split="train")
+    db_train = Woodscape_dataset(base_dir="/localscratch/prongs.45335371.0/data/woodscapes", split="train")
     # trainloader = DataLoader(db_train, batch_size=8, shuffle=True, num_workers=1, pin_memory=True)
     # for i_batch, sampled_batch in enumerate(trainloader):
     #     import pdb;pdb.set_trace()
     #     print("ass")
+    mean,std= get_mean_std(base_dir="/localscratch/prongs.45335371.0/data/woodscapes")
     m = db_train[0]
     import pdb;pdb.set_trace()
     print("ass")

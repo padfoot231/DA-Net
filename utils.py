@@ -475,34 +475,19 @@ def linspace(start, stop, num):
     # the output starts at 'start' and increments until 'stop' in each dimension
     out = start[None] + steps*(stop - start)[None]
     
-    return 
+    return out
 
 def get_inverse_distortion(num_points, D, mag=1.0):
-    r_to_theta = lambda r: r *(190/180)*(np.pi/2) / mag
-    dist_func = lambda x: x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (torch.outer(D[0], x**0).flatten() + torch.outer(D[1], x**1).flatten() + torch.outer(D[2], x**2).flatten() +torch.outer(D[3], x**3).flatten())
-    theta_d_max = dist_func(torch.tensor([r_to_theta(mag)]).cuda())
-    theta_d = torch.linspace(0, float(theta_d_max[0]), num_points+1).reshape(1, num_points+1).repeat_interleave(D.shape[1], 0).transpose(1,0).cuda()
-    test_r = torch.linspace(0, mag, 20000).cuda()
-    
-    # np.linspace(0, mag, 20000)
-    test_theta_d = dist_func(torch.tensor(r_to_theta(test_r))).reshape(D.shape[1], 20000).transpose(1,0)
+    focal = lambda x: 1/(x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (torch.outer(D[0], x**0).flatten() + torch.outer(D[1], x**1).flatten() + torch.outer(D[2], x**2).flatten() +torch.outer(D[3], x**3).flatten()))
+    fov = 1.48806
+    theta_d_max = torch.tensor(fov).reshape(1).cuda()
+    f = focal(theta_d_max).reshape(1, D.shape[1])
+    dist_func = lambda x: f* x * (D[0] * x**0 + D[1] * x**1 + D[2] * x**2 + D[3] * x**3)
+    theta_d = torch.linspace(0, torch.tan(torch.tensor(fov)), num_points+1).reshape(1, num_points+1).repeat_interleave(D.shape[1], 0).transpose(1,0).cuda()
 
-    r_list = torch.zeros(num_points*D.shape[1]).reshape(num_points, D.shape[1]).cuda()
-    for j in range(D.shape[1]):
-        for i in range(num_points):
-            lower_idx = test_theta_d[:, j][test_theta_d[:, j] <= theta_d[:, j][i]].argmax()
-            upper_idx = lower_idx + 1
-            
-            try:
-                x_0, x_1 = test_r[lower_idx], test_r[upper_idx]
-                y_0, y_1 = test_theta_d[:, j][lower_idx], test_theta_d[:, j][upper_idx]
-            except:
-                x_0, x_1 = test_r[lower_idx], test_r[lower_idx]
-                y_0, y_1 = test_theta_d[:, j][lower_idx], test_theta_d[:, j][lower_idx]
-
-            r_list[:, j][i] = x_0 + (theta_d[:, j][i] - y_0) * (x_1 - x_0) / (y_1 - y_0)
-    max_rad = torch.tensor([1]*D.shape[1]).reshape(1, D.shape[1]).cuda()
-    return torch.cat((r_list, max_rad), axis=0), (190/180)*(np.pi)
+    r_list = dist_func(torch.arctan(theta_d))
+    # breakpoint()
+    return r_list, fov
 
 def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # 
@@ -512,7 +497,7 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # fov = compute_fov(focal_length, 0, width)
     # new_xi = xi
     # new_f = compute_focal(fov, new_xi, width)
-    # 
+    #   
     rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
     # rad_1 = lambda x: new_f/8*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
     theta_d_max = torch.tan(fov/2).cuda()

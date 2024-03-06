@@ -25,7 +25,7 @@ _C.DATA.BATCH_SIZE = 32
 # Path to dataset, could be overwritten by command line argument
 _C.DATA.DATA_PATH = ''
 # Dataset name
-_C.DATA.DATASET = 'Cityscapes'
+_C.DATA.DATASET = 'Woodscapes'
 # Input image size
 _C.DATA.IMG_SIZE = 128 ##224 
 # Interpolation to resize image (random, bilinear, bicubic)
@@ -41,6 +41,11 @@ _C.DATA.PIN_MEMORY = True
 _C.DATA.NUM_WORKERS = 3
 _C.DATA.low = 0.0
 _C.DATA.high = 0.05
+#field of view 
+_C.DATA.FOV = 90
+
+#xi distortion parameter
+_C.DATA.XI = 0.0
 
 
 # -----------------------------------------------------------------------------
@@ -95,14 +100,14 @@ _C.MODEL.SWIN_MLP.WINDOW_SIZE = 4 ## 7
 _C.MODEL.SWIN_MLP.MLP_RATIO = 4.
 _C.MODEL.SWIN_MLP.APE = False
 _C.MODEL.SWIN_MLP.PATCH_NORM = True
-_C.MODEL.NRADIUS = 4
-_C.MODEL.NAZIMUTH = 4
+_C.MODEL.NRADIUS = 20
+_C.MODEL.NAZIMUTH = 20
 # -----------------------------------------------------------------------------
 # Training settings
 # -----------------------------------------------------------------------------
 _C.TRAIN = CN()
 _C.TRAIN.START_EPOCH = 0
-_C.TRAIN.EPOCHS = 600
+_C.TRAIN.EPOCHS = 1200
 _C.TRAIN.WARMUP_EPOCHS = 0
 _C.TRAIN.WEIGHT_DECAY = 0.05
 _C.TRAIN.BASE_LR = 0.05
@@ -129,7 +134,7 @@ _C.TRAIN.LR_SCHEDULER.DECAY_RATE = 0.1
 
 # Optimizer
 _C.TRAIN.OPTIMIZER = CN()
-_C.TRAIN.OPTIMIZER.NAME = 'adamw'
+_C.TRAIN.OPTIMIZER.NAME = 'sgd'
 # Optimizer Epsilon
 _C.TRAIN.OPTIMIZER.EPS = 1e-8
 # Optimizer Betas
@@ -223,7 +228,10 @@ def update_config(config, args):
 
 
     # merge from specific arguments
-    
+    if args.fov:
+        config.DATA.FOV = args.fov  
+    if args.xi:
+        config.DATA.XI = args.xi
     if args.num_classes:
         config.MODEL.NUM_CLASSES = args.num_classes
     if args.img_size:

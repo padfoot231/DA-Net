@@ -36,7 +36,7 @@ from timm.utils import accuracy, AverageMeter
 from config import get_config
 from data import build_loader
 from lr_scheduler import build_scheduler
-from optimizer import build_optimizer
+# from optimizer import build_optimizer
 from logger import create_logger
 from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScalerWithGradNormCount, auto_resume_helper, \
     reduce_tensor
@@ -80,7 +80,9 @@ def parse_option():
     parser.add_argument('--tag', help='tag of experiment')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--throughput', action='store_true', help='Test throughput only')
-    parser.add_argument('--base_lr', type=float, help="base learning rate")
+    parser.add_argument('--base_lr', type=float , help="base learning rate")
+    parser.add_argument('--fov', type=float, default=90.0, help="field of view")
+    parser.add_argument('--xi', type=float, default=0.0, help="distortion parameter of the image")
 
     # distributed training
     parser.add_argument("--local_rank", type=int, required=True, help='local rank for DistributedDataParallel')
@@ -138,15 +140,15 @@ def main(config):
 
     if config.MODEL.RESUME:
         max_miou = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, loss_scaler, logger)
-        miou, loss = validate(config, data_loader_val, model)
-        logger.info(f"Mean iou of the network on the {len(dataset_val)} test images: {miou:.1f}%")
+        miou, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
+        logger.info(f"Mean iou of the network on the {len(dataset_val)} test images: {miou:.4f}")
         if config.EVAL_MODE:
             return
 
     if config.MODEL.PRETRAINED and (not config.MODEL.RESUME):
         load_pretrained(config, model_without_ddp, logger)
-        miou, loss = validate(config, data_loader_val, model)
-        logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {miou:.1f}%")
+        miou, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
+        logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {miou:.4f}")
 
     if config.THROUGHPUT_MODE:
         throughput(data_loader_val, model, logger)
@@ -167,7 +169,7 @@ def main(config):
         # acc1_test, acc5_test, loss_test = test(config, data_loader_test, model)
         logger.info(f"Mean IOU of the network on the {len(dataset_val)} test images: {miou:.1f}%")
         max_miou = max(max_miou, miou)
-        logger.info(f'Max accuracy: {max_miou:.2f}%')
+        logger.info(f'Max miou: {max_miou:.2f}%')
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -191,19 +193,18 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
     end = time.time()
     for idx, (samples, targets, dist, cls, mask, one_hot) in enumerate(data_loader):
 
-
         ###############
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
+        # breakpoint()
         # dist = dist.cuda(non_blocking=True)   
         cls = cls.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
         one_hot = one_hot.cuda(non_blocking=True)
-        # breakpoint()
         outputs = model(samples, dist, cls)
         B, _, _, _ = samples.shape
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
-        outputs[:, :, mask[0] == 0] = one_hot[:, :, mask[0] == 0]
+        outputs[:, :, mask[0, 0] == 0] = one_hot[:, :, mask[0, 0] == 0]
         
         
         loss_ce = ce_loss(outputs, targets[:].long())
@@ -233,6 +234,17 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         batch_time.update(time.time() - end)
         end = time.time()
 
+        if (idx) % 100==0:
+            # breakpoint()
+            # image= images[0,...].permute(1,2,0)
+            # image*= torch.tensor(std).cuda(cuda_id)
+            # image+= torch.tensor(mean).cuda(cuda_id)
+            # plt.imsave(save_path+ '/val_img_{}.png'.format(epoch_num), np.clip(image.cpu().numpy(),0,1) )
+            label = targets[0].detach().cpu().numpy()
+            plt.imsave(config.OUTPUT+ '/train_label_{}.png'.format(idx), label.astype(np.uint8))
+            pred= outputs.argmax(1)[0].cpu().detach().numpy()
+            plt.imsave(config.OUTPUT+ '/train_pred_{}.png'.format(idx), pred)
+
         # wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val })
 
         if idx % config.PRINT_FREQ == 0:
@@ -260,6 +272,9 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
     
     model.eval()
 
+    mean=[0.2151, 0.2235, 0.2283]
+    std=[0.2300, 0.2334, 0.2419]
+
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
     miou_meter = AverageMeter()
@@ -282,7 +297,7 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
             
         B, _, _, _ = images.shape
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
-        output[:, :, mask[0] == 0] = one_hot[:, :, mask[0] == 0]
+        output[:, :, mask[0, 0] == 0] = one_hot[:, :, mask[0, 0] == 0]
 
         # measure accuracy and record loss
         loss_ce = ce_loss(output, target[:].long())
@@ -305,15 +320,15 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if (idx) % 10==0:
-            # image= images[0,...].permute(1,2,0)
-            # image*= torch.tensor(std).cuda(cuda_id)
-            # image+= torch.tensor(mean).cuda(cuda_id)
-            # plt.imsave(save_path+ '/val_img_{}.png'.format(epoch_num), np.clip(image.cpu().numpy(),0,1) )
+        if (idx) % 100==0:
+            image= images[0,...].permute(1,2,0)
+            image*= torch.tensor(std).cuda()
+            image+= torch.tensor(mean).cuda()
+            plt.imsave(config.OUTPUT+ '/' +  '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
             label = target[0].detach().cpu().numpy()
-            plt.imsave(config.OUTPUT+ '/val_label_{}.png'.format(idx), label.astype(np.uint8))
+            plt.imsave(config.OUTPUT+ '/' +  '/val_label_{}.png'.format(idx), label.astype(np.uint8))
             pred= output.argmax(1)[0].cpu().detach().numpy()
-            plt.imsave(config.OUTPUT+ '/val_pred_{}.png'.format(idx), pred)
+            plt.imsave(config.OUTPUT+ '/' +  '/val_pred_{}.png'.format(idx), pred)
 
         if idx % config.PRINT_FREQ == 0:
             memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
@@ -327,7 +342,7 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
     #     pkl.dump(data_dic, f)
     # logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
     wandb.log({"loss_val" :loss_meter.avg, 
-            "Acc1" : miou.avg})
+            "Acc1" : miou_meter.avg})
 
     return miou_meter.avg, loss_meter.avg
 

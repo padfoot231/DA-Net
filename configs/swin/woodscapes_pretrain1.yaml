@@ -1,0 +1,13 @@
+MODEL:
+  TYPE: swin_ang
+  NAME: woodscapes_pretrain1
+  DROP_PATH_RATE: 0.2
+  SWIN:
+    EMBED_DIM: 96
+    FINAL_UPSAMPLE: "expand_first"
+    DEPTHS: [ 2, 2, 18, 2 ]
+    NUM_HEADS: [ 3, 6, 12, 24 ]
+    WINDOW_SIZE: (1,16)
+DATA:
+  high: 0.0
+  low: 0.05
