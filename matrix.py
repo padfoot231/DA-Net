@@ -13,7 +13,7 @@ dtype = torch.float32 if use_cuda else torch.float64
 device_id = "cuda:0" if use_cuda else "cpu"
 # from utils import get_sample_params_from_subdiv, get_sample_locations
 import numpy as np
-from utils import get_sample_params_from_subdiv, distort_image
+from utils import get_sample_params_from_subdiv
 from torchvision.transforms import transforms
 t2pil = transforms.ToTensor()
 pil = transforms.ToPILImage()
@@ -25,7 +25,6 @@ def KMeans(x, c, K=10, Niter=10, verbose=True):
 
     x_i = LazyTensor(x.view(B, N, 1, D))  # (N, 1, D) samples
     c_j = LazyTensor(c.view(B, 1, K, D))  # (1, K, D) centroids
-    breakpoint()
     D_ij = ((x_i - c_j) ** 2).sum(B, -1)  # (N, K) symbolic squared distances
     cl = D_ij.argmin(dim=2).long().view(B, -1)  # Points -> Nearest cluster
 
@@ -63,7 +62,7 @@ def resample(grid, grid_pix, H, B):
 #     pixel_out = pixel_out.transpose(2, 1).reshape(B, 3, H, H)
     return cl
 
-with open('/home-local2/akath.extra.nobkp/woodscapes/calib.pkl', 'rb') as f:
+with open('/home-local2/akath.extra.nobkp/woodscape/calib.pkl', 'rb') as f:
     data = pkl.load(f)
 
 key = list(data.keys())
@@ -74,22 +73,18 @@ y = torch.linspace(0, W, W+1) - W//2 + 0.5
 grid_x, grid_y = torch.meshgrid(x[1:], y[1:])
 x_ = grid_x.reshape(H*W, 1)
 y_ = grid_y.reshape(H*W, 1)
-grid_pix = torch.cat((x_, y_), dim=1)
+grid_pix = torch.cat((x_, y_), dim=1).type(torch.float32)
 grid_pix = grid_pix.reshape(1, H*W, 2).cuda("cuda:0")
 
-key = [[1.0, 0.0, 0.0, 0.0]]
-
 for i in range(len(key)):
-    print(i)
-    # D = torch.tensor(data[key[i]].reshape(1,4).transpose(1,0)).cuda("cuda:0")
-    D = np.array([1.0, 0.0, 0.0, 0.0])
-    D = torch.tensor(D.reshape(1,4).transpose(1,0)).cuda("cuda:0")
-    
-    
+    print(key[i])
+    D = torch.tensor(data[key[i]].reshape(1,4).transpose(1,0)).cuda("cuda:0")
+    # D = np.array([1.0, 0.0, 0.0, 0.0])
+    # D = torch.tensor(D.reshape(1,4).transpose(1,0)).cuda("cuda:0")
     azimuth_subdiv = H
     radius_subdiv = W//4
-    n_radius = 4
-    n_azimuth = 4
+    n_radius = 8
+    n_azimuth = 8
     subdiv = (radius_subdiv*n_radius, azimuth_subdiv*n_azimuth)
     # subdiv = 3
 
@@ -111,20 +106,21 @@ for i in range(len(key)):
     y = yc.reshape(1, 1, -1).transpose(1,2).cuda("cuda:0")
     # y = torch.repeat_interleave(y, 2, 0).cuda("cuda:2")
 #     out = torch.cat((y_, x_), dim = 3)
-    grid_ = torch.cat((x, y), dim=2)
+    grid_ = torch.cat((x, y), dim=2).type(torch.float32)
     # grid_ = grid_.reshape(1, -1, 2)
-    # x = resample(grid_, grid_pix, 128, 2)
-    B, N, D, P, k = grid_.shape[0], grid_.shape[1], 2, grid_pix.shape[1], 1
+    # x = resample(grid_, gid_pix, 128, 2)
+    B, N, D, P, k = grid_.shape[0], grid_.shape[1], 2, grid_pix.shape[1], 4
+    # breakpoint()
     cl = KNN(grid_/(H//2), grid_pix/(W//2), P, k)
     # cl = np.array(cl.cpu())
-    cl = cl[0].cpu()
+    cl = cl[0].cpu()    
     # breakpoint()
-    np.save('/home-local2/akath.extra.nobkp/cityscapes/key_4t4_1.pkl', cl)
+    np.save('/home-local2/akath.extra.nobkp/woodscape/matrix_8/8_8_' + str(key[i]) + '.pkl', cl)
     print(i)
 
 
 
-
+ 
 
 
 # grid = grid.reshape(8234, -1, 2)

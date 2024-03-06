@@ -684,10 +684,10 @@ class BasicLayer_up(nn.Module):
             x = self.upsample(x, theta_max) #here theta_max doesn't do anything 
         return x
 
-class DnCNN(nn.Module):
+class UDnCNN(nn.Module):
 
-    def __init__(self, D, C=96, num_classes = 10):
-        super(DnCNN, self).__init__()
+    def __init__(self, D, C=96):
+        super(UDnCNN, self).__init__()
         self.D = D
 
         # convolution layers
@@ -710,8 +710,21 @@ class DnCNN(nn.Module):
     def forward(self, x):
         D = self.D
         h = F.relu(self.conv[0](x))
-        for i in range(D):
+        h_buff = []
+        idx_buff = []
+        shape_buff = []
+        for i in range(D//2-1):
+            shape_buff.append(h.shape)
+            h, idx = F.max_pool2d(F.relu(self.bn[i](self.conv[i+1](h))),
+                                  kernel_size=(2, 2), return_indices=True)
+            h_buff.append(h)
+            idx_buff.append(idx)
+        for i in range(D//2-1, D//2+1):
             h = F.relu(self.bn[i](self.conv[i+1](h)))
+        for i in range(D//2+1, D):
+            j = i - (D // 2 + 1) + 1
+            h = F.max_unpool2d(F.relu(self.bn[i](self.conv[i+1]((h+h_buff[-j])/np.sqrt(2)))),
+                               idx_buff[-j], kernel_size=(2, 2), output_size=shape_buff[-j])
         y = self.conv[D+1](h) + x
         return y
 
@@ -800,7 +813,7 @@ class PatchEmbed(nn.Module):
         return flops
 
 
-class swin_transformer_angular_denoiser(nn.Module):
+class swin_transformer_angular_denoiser_unet(nn.Module):
     r""" Swin Transformer
         A PyTorch impl of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows`  -
           https://arxiv.org/pdf/2103.14030
@@ -929,7 +942,7 @@ class swin_transformer_angular_denoiser(nn.Module):
             print("---final upsample expand_first---")
             self.up = FinalPatchExpand_X4(input_resolution=(patches_resolution[0], patches_resolution[1]),input_dim=embed_dim,dim=embed_dim, n_radius=n_radius, n_azimuth=n_azimuth)
             # self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
-            self.output = DnCNN(D = 4, C = embed_dim, num_classes=self.num_classes)
+            self.output = UDnCNN(D = 4, C = embed_dim)
             self.final = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
 
 
@@ -993,6 +1006,7 @@ class swin_transformer_angular_denoiser(nn.Module):
         x = self.forward_up_features(x ,x_downsample, theta_max)
         x = self.up_x4(x)
         x = restruct(x, cls, self.embed_dim, self.img_size, self.img_size)
+        # breakpoint()
         x = self.output(x)
         x = self.final(x)
         return x
@@ -1007,7 +1021,7 @@ class swin_transformer_angular_denoiser(nn.Module):
         return flops
 
 if __name__=='__main__':
-    model = swin_transformer_angular_denoiser(img_size=64,
+    model = swin_transformer_angular_denoiser_unet(img_size=64,
                         radius_cuts=16, 
                         azimuth_cuts=64,
                         in_chans=3,
