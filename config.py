@@ -100,19 +100,19 @@ _C.MODEL.SWIN_MLP.WINDOW_SIZE = 4 ## 7
 _C.MODEL.SWIN_MLP.MLP_RATIO = 4.
 _C.MODEL.SWIN_MLP.APE = False
 _C.MODEL.SWIN_MLP.PATCH_NORM = True
-_C.MODEL.NRADIUS = 20
-_C.MODEL.NAZIMUTH = 20
+_C.MODEL.NRADIUS = 10
+_C.MODEL.NAZIMUTH = 10
 # -----------------------------------------------------------------------------
 # Training settings
 # -----------------------------------------------------------------------------
 _C.TRAIN = CN()
 _C.TRAIN.START_EPOCH = 0
 _C.TRAIN.EPOCHS = 1200
-_C.TRAIN.WARMUP_EPOCHS = 0
-_C.TRAIN.WEIGHT_DECAY = 0.05
+_C.TRAIN.WARMUP_EPOCHS = 4
+_C.TRAIN.WEIGHT_DECAY = 0.0001
 _C.TRAIN.BASE_LR = 0.05
-_C.TRAIN.WARMUP_LR = 5e-7
-_C.TRAIN.MIN_LR = 5e-6
+_C.TRAIN.WARMUP_LR = 5e-3
+_C.TRAIN.MIN_LR = 5e-2
 # Clip gradient norm
 _C.TRAIN.CLIP_GRAD = 5.0
 # Auto resume from latest checkpoint

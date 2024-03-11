@@ -36,7 +36,7 @@ from timm.utils import accuracy, AverageMeter
 from config import get_config
 from data import build_loader
 from lr_scheduler import build_scheduler
-# from optimizer import build_optimizer
+from optimizer import build_optimizer
 from logger import create_logger
 from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScalerWithGradNormCount, auto_resume_helper, \
     reduce_tensor
@@ -109,8 +109,8 @@ def main(config):
     model.cuda()
     model_without_ddp = model
     # breakpoint()
-    optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
-    # optimizer = build_optimizer(config, model)
+    # optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+    optimizer = build_optimizer(config, model)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[config.LOCAL_RANK], broadcast_buffers=False)
     loss_scaler = NativeScalerWithGradNormCount()
 
@@ -180,8 +180,8 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
     model.train()
     optimizer.zero_grad()
     num_steps = len(data_loader)
-    metric_perclass = MulticlassJaccardIndex(num_classes=34, average=None).cuda()
-    metric = MulticlassJaccardIndex(num_classes=34).cuda()
+    metric_perclass = MulticlassJaccardIndex(num_classes=config.MODEL.NUM_CLASSES, average=None).cuda()
+    metric = MulticlassJaccardIndex(num_classes=config.MODEL.NUM_CLASSES).cuda()
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
     norm_meter = AverageMeter()
@@ -234,7 +234,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if (idx) % 100==0:
+        if (idx) % 1==0:
             # breakpoint()
             # image= images[0,...].permute(1,2,0)
             # image*= torch.tensor(std).cuda(cuda_id)
@@ -278,8 +278,8 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
     miou_meter = AverageMeter()
-    metric_perclass = MulticlassJaccardIndex(num_classes=34, average=None).cuda()
-    metric = MulticlassJaccardIndex(num_classes=34).cuda()
+    metric_perclass = MulticlassJaccardIndex(num_classes=config.MODEL.NUM_CLASSES, average=None).cuda()
+    metric = MulticlassJaccardIndex(num_classes=config.MODEL.NUM_CLASSES).cuda()
     end = time.time()
     running_loss = 0
     running_acc1 = 0

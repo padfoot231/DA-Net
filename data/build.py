@@ -19,7 +19,7 @@ from .cached_image_folder import CachedImageFolder
 from .imagenet22k_dataset import IN22KDATASET
 from .samplers import SubsetRandomSampler
 from .Distorted_imagenet import M_distort
-from .Woodsc import Woodscape_dataset
+from .Woodsc import Woodscape_dataset, RandomGenerator
 from .cityscapes import Cityscape_dataset
 from .CVRG_pano import CVRG
 
@@ -134,7 +134,7 @@ def build_dataset(is_train, config):
             nb_classes = 200
     elif config.DATA.DATASET == 'Woodscapes':
         if is_train:
-            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE)
+            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
             nb_classes = 10
         else:
             dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE)

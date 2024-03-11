@@ -36,19 +36,19 @@ def imresize(im, size, interp='bilinear'):
 
 def random_rot_flip(image, label):
     k = np.random.randint(0, 4)
-    image = np.rot90(image, k)
-    label = np.rot90(label, k)
-    axis = np.random.randint(0, 2)
-    image = np.flip(image, axis=axis).copy()
-    label = np.flip(label, axis=axis).copy()
+    image = torch.rot90(image, k, dims=[1, 2])
+    label = torch.rot90(label, k, dims=[0, 1])
+    axis = np.random.randint(1, 3)
+    image = torch.flip(image, dims=[1,2])
+    label = torch.flip(label, dims=[0,1])
     return image, label
 
 
 def random_rotate(image, label):
     angle = np.random.randint(-20, 20)
-    image = ndimage.rotate(image, angle, order=0, reshape=False)
-    label = ndimage.rotate(label, angle, order=0, reshape=False)
-    return image, label
+    image = transforms.functional.rotate(image, angle)
+    label = transforms.functional.rotate(label.reshape(1, label.shape[0], label.shape[1]), angle)
+    return image, label[0]
 
 
 def img_transform(img):
@@ -83,13 +83,14 @@ class RandomGenerator(object):
             image, label = random_rot_flip(image, label)
         elif random.random() > 0.5:
             image, label = random_rotate(image, label)
-        x, y = image.shape
-        if x != self.output_size[0] or y != self.output_size[1]:
-            image = zoom(image, (self.output_size[0] / x, self.output_size[1] / y), order=3)  # why not 3?
-            label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y), order=0)
-        image = torch.from_numpy(image.astype(np.float32)).unsqueeze(0)
-        label = torch.from_numpy(label.astype(np.float32))
-        sample = {'image': image, 'label': label.long()}
+        # print(image.shape, label.shape, type(image), type(label))
+        # x, y = image.shape
+        # if x != self.output_size[0] or y != self.output_size[1]:
+        #     image = zoom(image, (self.output_size[0] / x, self.output_size[1] / y), order=3)  # why not 3?
+        #     label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y), order=0)
+        # image = torch.from_numpy(image.astype(np.float32)).unsqueeze(0)
+        # label = torch.from_numpy(label.astype(np.float32))
+        sample = {'image': image.type(torch.float32), 'label': label.type(torch.uint8)}
         return sample
 
 
@@ -110,7 +111,7 @@ class Woodscape_dataset(Dataset):
         with open(base_dir + '/calib.pkl', 'rb') as f:
             calib = pkl.load(f)
         self.calib = calib
-        self.data = data
+        self.data = data[:4]
         self.data_dir = base_dir
         self.img_size = img_size
 
@@ -120,10 +121,10 @@ class Woodscape_dataset(Dataset):
     def __getitem__(self, idx):
         img_path = self.data_dir + '/rgb_images/' + self.data[idx]
         lbl_path = self.data_dir + '/gtLabels/' + self.data[idx]
-        mat_path = self.data_dir + '/matrix_20/'+ '20_20_' + self.data[idx] + '.pkl.npy'
+        mat_path = self.data_dir + '/matrix_10/'+ '1_4_' + self.data[idx][:-4] + '_img.png.pkl.npy'
         img = Image.open(img_path).convert('RGB')
         segm = Image.open(lbl_path).convert('L')
-        key = self.data[idx]
+        key = self.data[idx][:-4] + '_img.png'
         cls = np.load(mat_path)
 
         dist = self.calib[key].astype(np.float32)
