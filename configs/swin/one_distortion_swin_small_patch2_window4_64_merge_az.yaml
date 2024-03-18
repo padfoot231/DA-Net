@@ -1,9 +1,0 @@
-MODEL:
-  TYPE: swin
-  NAME: one_distortion_swin_small_patch2_window4_64_merge_az
-  DROP_PATH_RATE: 0.2
-  SWIN:
-    EMBED_DIM: 96
-    DEPTHS: [ 2, 2, 18, 2 ]
-    NUM_HEADS: [ 3, 6, 12, 24 ]
-    WINDOW_SIZE: (1,16)

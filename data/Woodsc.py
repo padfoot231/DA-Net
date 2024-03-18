@@ -111,7 +111,7 @@ class Woodscape_dataset(Dataset):
         with open(base_dir + '/calib.pkl', 'rb') as f:
             calib = pkl.load(f)
         self.calib = calib
-        self.data = data[:4]
+        self.data = data
         self.data_dir = base_dir
         self.img_size = img_size
 

@@ -67,21 +67,25 @@ def R(window_size, num_heads, radius, D, a_r, b_r, r_max):
     
     return A_r
 
-def theta(window_size, num_heads, radius, theta_max, a_r, b_r, H, P): # change theta_max to D
+def theta(window_size, num_heads, radius, theta_max, a_r, b_r, H): # change theta_max to D
+    a_r = a_r[radius]
+    b_r = b_r[radius]
     radius = radius*theta_max/H
     radius = radius[:, :, None].repeat(1, 1, num_heads)
-    A_r = 0
-    for i in range(1,P+1):
-        A_r += a_r[i]*torch.cos(i*radius) + b_r[i-1]*torch.sin(i*radius)
-    return A_r/P + a_r[0]
+    A_r = a_r*torch.cos(radius) + b_r*torch.sin(radius)
+    
+    return A_r
 
-def phi(window_size, num_heads, azimuth, a_p, b_p, W, P):
+def phi(window_size, num_heads, azimuth, a_p, b_p, W):
+    a_p = a_p[azimuth]
+    b_p = b_p[azimuth]
     azimuth = azimuth*2*np.pi/W
     azimuth = azimuth[:, :, None].repeat(1, 1, num_heads)
-    A_phi = 0
-    for i in range(1, P+1):
-        A_phi += a_p[i]*torch.cos(i*azimuth) + b_p[i-1]*torch.sin(i*azimuth)
-    return A_phi/P + a_p[0] 
+
+    A_phi = a_p*torch.cos(azimuth) + b_p*torch.sin(azimuth)
+    # import pdb;pdb.set_trace()
+    return A_phi 
+
 
 def window_partition(x, window_size):
     """
@@ -161,30 +165,30 @@ class WindowAttention(nn.Module):
         # define a parameter table of relative position bias
         # self.relative_position_bias_table = nn.Parameter(
         #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
-        self.a_p = nn.Parameter(
-            torch.zeros(self.P+1, num_heads))
-        self.b_p = nn.Parameter(
-            torch.zeros(self.P, num_heads))
-        self.a_r = nn.Parameter(
-            torch.zeros(self.P+1, num_heads))
-        self.b_r = nn.Parameter(
-            torch.zeros(self.P, num_heads))
+        # self.a_p = nn.Parameter(
+        #     torch.zeros(self.P+1, num_heads))
+        # self.b_p = nn.Parameter(
+        #     torch.zeros(self.P, num_heads))
+        # self.a_r = nn.Parameter(
+        #     torch.zeros(self.P+1, num_heads))
+        # self.b_r = nn.Parameter(
+        #     torch.zeros(self.P, num_heads))
         
 
-        # if input_resolution == window_size:
-        #     self.a_p = nn.Parameter(
-        #         torch.zeros(window_size[1], num_heads))
-        #     self.b_p = nn.Parameter(
-        #         torch.zeros(window_size[1], num_heads))
-        # else:
-        #     self.a_p = nn.Parameter(
-        #         torch.zeros((2 * window_size[1] - 1), num_heads))
-        #     self.b_p = nn.Parameter(
-        #         torch.zeros((2 * window_size[1] - 1), num_heads))
-        # self.a_r = nn.Parameter(
-        #     torch.zeros((2 * window_size[0] - 1), num_heads))
-        # self.b_r = nn.Parameter(
-        #     torch.zeros((2 * window_size[0] - 1), num_heads))
+        if input_resolution == window_size:
+            self.a_p = nn.Parameter(
+                torch.zeros(window_size[1], num_heads))
+            self.b_p = nn.Parameter(
+                torch.zeros(window_size[1], num_heads))
+        else:
+            self.a_p = nn.Parameter(
+                torch.zeros((2 * window_size[1] - 1), num_heads))
+            self.b_p = nn.Parameter(
+                torch.zeros((2 * window_size[1] - 1), num_heads))
+        self.a_r = nn.Parameter(
+            torch.zeros((2 * window_size[0] - 1), num_heads))
+        self.b_r = nn.Parameter(
+            torch.zeros((2 * window_size[0] - 1), num_heads))
 
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
@@ -238,8 +242,8 @@ class WindowAttention(nn.Module):
         # relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
         #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1], self.P)
-        A_theta = theta(self.window_size, self.num_heads, self.radius, theta_max, self.a_r, self.b_r, self.input_resolution[0], self.P) # change input_resolution[0] to r_max
+        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1])
+        A_theta = theta(self.window_size, self.num_heads, self.radius, theta_max, self.a_r, self.b_r, self.input_resolution[0]) # change input_resolution[0] to r_max
         
         attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0).contiguous() + A_theta.transpose(1, 2).transpose(0, 1).unsqueeze(0).contiguous()
 

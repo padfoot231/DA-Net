@@ -9,5 +9,5 @@ MODEL:
     NUM_HEADS: [ 3, 6, 12, 24 ]
     WINDOW_SIZE: (1,16)
 DATA:
-  high: 0.0
-  low: 0.05
+  HIGH: 0.0
+  LOW: 0.05

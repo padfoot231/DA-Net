@@ -39,8 +39,8 @@ _C.DATA.CACHE_MODE = 'part'
 _C.DATA.PIN_MEMORY = True
 # Number of data loading threads
 _C.DATA.NUM_WORKERS = 3
-_C.DATA.low = 0.0
-_C.DATA.high = 0.05
+_C.DATA.LOW = 0.0
+_C.DATA.HIGH = 0.05
 #field of view 
 _C.DATA.FOV = 90
 
@@ -78,6 +78,7 @@ _C.MODEL.SWIN.EMBED_DIM = 96
 _C.MODEL.SWIN.DEPTHS = [2, 2, 6, 2]
 _C.MODEL.SWIN.NUM_HEADS = [3, 6, 12, 24]
 _C.MODEL.SWIN.WINDOW_SIZE = (1, 16) # change the window size to a tupple
+_C.MODEL.SWIN.WINDOW_SIZE_GRID = 4
 _C.MODEL.SWIN.MLP_RATIO = 4.
 _C.MODEL.SWIN.QKV_BIAS = True
 _C.MODEL.SWIN.QK_SCALE = None
@@ -112,7 +113,7 @@ _C.TRAIN.WARMUP_EPOCHS = 4
 _C.TRAIN.WEIGHT_DECAY = 0.0001
 _C.TRAIN.BASE_LR = 0.05
 _C.TRAIN.WARMUP_LR = 5e-3
-_C.TRAIN.MIN_LR = 5e-2
+_C.TRAIN.MIN_LR = 0.005
 # Clip gradient norm
 _C.TRAIN.CLIP_GRAD = 5.0
 # Auto resume from latest checkpoint

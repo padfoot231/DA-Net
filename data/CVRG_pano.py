@@ -24,12 +24,13 @@ T = transforms.ToTensor()
 
 def random_rot_flip(image, label):
     k = np.random.randint(0, 4)
-    image = np.rot90(image, k)
-    label = np.rot90(label, k)
-    axis = np.random.randint(0, 2)
-    image = np.flip(image, axis=axis).copy()
-    label = np.flip(label, axis=axis).copy()
+    image = torch.rot90(image, k, dims=[1, 2])
+    label = torch.rot90(label, k, dims=[0, 1])
+    axis = np.random.randint(1, 3)
+    image = torch.flip(image, dims=[1,2])
+    label = torch.flip(label, dims=[0,1])
     return image, label
+
 
 def img_transform(img):
     # 0-255 to 0-1
@@ -40,9 +41,9 @@ def img_transform(img):
     
 def random_rotate(image, label):
     angle = np.random.randint(-20, 20)
-    image = ndimage.rotate(image, angle, order=1, reshape=False)
-    label = ndimage.rotate(label, angle, order=0, reshape=False)
-    return image, label
+    image = transforms.functional.rotate(image, angle)
+    label = transforms.functional.rotate(label.reshape(1, label.shape[0], label.shape[1]), angle)
+    return image, label[0]
 
 #'png'
 def load_color(filename: str) -> torch.Tensor:    
@@ -188,7 +189,7 @@ normalize= transforms.Normalize(
             std= std )
 #normalize = None
 class CVRG(Dataset):
-    def __init__(self, base_dir, split, xi, model= "spherical", img_size = 128, fov = 0.2, low=0.35, transform=None):
+    def __init__(self, base_dir, split, xi, model= "spherical", img_size = 128, fov = 0.2, high=0.0, low=0.35, transform=None):
         self.fov = fov
         self.transform = transform  # using transform in torch!
         self.split = split
@@ -198,6 +199,7 @@ class CVRG(Dataset):
         self.calib = None
         self.low = low
         self.xi = xi
+        self.high = high
         
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
@@ -212,7 +214,7 @@ class CVRG(Dataset):
             # with open(self.data_dir + '/test_calib.pkl', 'rb') as f:
             #     self.calib = pkl.load(f)
 
-        self.data = data #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
+        self.data = data[:4] #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
 
         # if self.calib is None and os.path.exists(self.data_dir+ '/calib_gp2.pkl') :
         #     with open(self.data_dir + '/calib_gp2.pkl', 'rb') as f:
@@ -226,7 +228,7 @@ class CVRG(Dataset):
     def __getitem__(self, idx):
         
         b_path= self.data[idx]
-        mat_path = self.data_dir + '/key_20t20_1.pkl.npy'
+        mat_path = self.data_dir + '/key_10t10_1.pkl.npy'
         if self.model =="polynomial":
             img_path = self.data_dir + '/rgb_images/' + self.data[idx]
             depth_path = self.data_dir + '/depth_maps/' + self.data[idx].replace('png','exr')
@@ -260,10 +262,12 @@ class CVRG(Dataset):
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
                 xi= self.xi
+                xi = random.uniform(self.low, self.high)
+                # print(xi, fov)
                 # print("distortion", xi)
                 deg = random.uniform(0, 360)
             elif self.split=='test':
-                xi= xi= self.xi
+                xi= self.xi
                 deg = 0
             # print(xi, deg)
             image, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)

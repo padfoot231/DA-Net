@@ -981,7 +981,7 @@ if __name__=='__main__':
                         embed_dim=96,
                         depths=[2, 2, 18, 2],
                         num_heads=[3, 6, 12, 24],
-                        distortion_model='polynomial', 
+                        distortion_model='spherical', 
                         window_size=(1, 16),
                         mlp_ratio=4,
                         qkv_bias=True,
@@ -991,20 +991,20 @@ if __name__=='__main__':
                         ape=False,
                         patch_norm=True,
                         use_checkpoint=False,
-                        n_radius = 20,
-                        n_azimuth = 20)
+                        n_radius = 10,
+                        n_azimuth = 10)
     model = model.cuda()
     
 
     t = torch.ones(1, 3, 64, 64).float().cuda()
-    img = Image.open('04087_FV.png')
+    img = Image.open('img.png')
     img = img.resize((128, 128))
     img = T(img)
     img = img.unsqueeze(0).cuda()
-    # dist = torch.tensor(np.array([1.0, 0.0, 0.0, 0.0]).reshape(1, 4)).float().cuda()
+    dist = torch.tensor([0.0, 1.5*2, 3.047911227757854]).reshape(1, 3).cuda()
     breakpoint()
-    dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    cls = np.load('20_20_04087_FV.png.pkl.npy')
+    # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
+    cls = np.load('key_10t10_1.pkl.npy')
     cls = cls.reshape(1, cls.shape[0], cls.shape[1])
     # breakpoint()
     pol, cart = model(img, dist, cls)
