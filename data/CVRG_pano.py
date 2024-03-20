@@ -204,9 +204,15 @@ class CVRG(Dataset):
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 data = pkl.load(f)
+            with open(base_dir + '/matrix_train.pkl', 'rb') as f:
+                dist = pkl.load(f)
+            keys = list(dist.keys())
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 data = pkl.load(f)
+            with open(base_dir + '/matrix_val.pkl', 'rb') as f:
+                dist = pkl.load(f)
+                keys = list(dist.keys())
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
                 data = pkl.load(f)
@@ -215,6 +221,8 @@ class CVRG(Dataset):
             #     self.calib = pkl.load(f)
 
         self.data = data[:4] #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
+        self.dist = dist
+        self.keys = keys
 
         # if self.calib is None and os.path.exists(self.data_dir+ '/calib_gp2.pkl') :
         #     with open(self.data_dir + '/calib_gp2.pkl', 'rb') as f:
@@ -228,7 +236,6 @@ class CVRG(Dataset):
     def __getitem__(self, idx):
         
         b_path= self.data[idx]
-        mat_path = self.data_dir + '/key_10t10_1.pkl.npy'
         if self.model =="polynomial":
             img_path = self.data_dir + '/rgb_images/' + self.data[idx]
             depth_path = self.data_dir + '/depth_maps/' + self.data[idx].replace('png','exr')
@@ -238,6 +245,7 @@ class CVRG(Dataset):
             if self.split == 'train' or self.split == 'val':
                 img_path = self.data_dir + '/train/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/train/mask/' + self.data[idx]
+                idx = random.randint(0, len(self.keys))
             elif self.split == 'test':
                 img_path = self.data_dir + '/test/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/test/mask/' + self.data[idx]
@@ -250,7 +258,7 @@ class CVRG(Dataset):
         segm = np.array(segm)
         # segm = segm_transform(segm)
         segm = segm.reshape(832, 1664, 1)
-        cls = np.load(mat_path)
+        cls = self.dist[keys[0]]
         # mat_path= img_path.replace('png','npy')
         #cl= np.load(mat_path)
 
@@ -261,10 +269,9 @@ class CVRG(Dataset):
             fov=self.fov
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
-                xi= self.xi
-                xi = random.uniform(self.low, self.high)
+                # xi= self.xi
+                xi = float(keys[idx].split('_')[0])
                 # print(xi, fov)
-                # print("distortion", xi)
                 deg = random.uniform(0, 360)
             elif self.split=='test':
                 xi= self.xi

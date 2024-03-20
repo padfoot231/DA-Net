@@ -483,19 +483,23 @@ def get_inverse_distortion(num_points, D, mag=1.0):
     theta_d_max = torch.tensor(fov).reshape(1).cuda()
     f = focal(theta_d_max).reshape(1, D.shape[1])
     dist_func = lambda x: f* x * (D[0] * x**0 + D[1] * x**1 + D[2] * x**2 + D[3] * x**3)
-    theta_d = torch.linspace(0, torch.tan(torch.tensor(fov)), num_points+1).reshape(1, num_points+1).repeat_interleave(D.shape[1], 0).transpose(1,0).cuda()
+    # theta_d = torch.linspace(0, torch.tan(torch.tensor(fov)), num_points+1).reshape(1, num_points+1).repeat_interleave(D.shape[1], 0).transpose(1,0).cuda()
+    theta_d = torch.linspace(0, fov, num_points+1).reshape(1, num_points+1).repeat_interleave(D.shape[1], 0).transpose(1,0).cuda()
     delta = float(torch.diff(theta_d, axis=0)[0][0])
     a = np.random.uniform(0, 1)
     err = np.random.uniform(0, delta/2)
     if  a > 0.5:
         err = np.random.uniform(0, delta/2)
         theta_d = theta_d + err
-        theta_d[-1] = torch.tan(torch.tensor(fov))
+        # theta_d[-1] = torch.tan(torch.tensor(fov))
+        theta_d[-1] = torch.tensor(fov)
     elif a < 0.5:
         theta_d = theta_d - err
         theta_d[0] = 0.0
-    r_list = dist_func(torch.arctan(theta_d))
-    return r_list, torch.tan(torch.tensor(fov))
+    # r_list = dist_func(torch.arctan(theta_d))
+    r_list = dist_func(theta_d)
+    # return r_list, torch.tan(torch.tensor(fov))
+    return r_list, fov
 
 def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # 
