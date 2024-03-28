@@ -25,7 +25,7 @@ _C.DATA.BATCH_SIZE = 32
 # Path to dataset, could be overwritten by command line argument
 _C.DATA.DATA_PATH = ''
 # Dataset name
-_C.DATA.DATASET = 'Woodscapes'
+_C.DATA.DATASET = 'CVRG'
 # Input image size
 _C.DATA.IMG_SIZE = 128 ##224 
 # Interpolation to resize image (random, bilinear, bicubic)
@@ -62,7 +62,7 @@ _C.MODEL.PRETRAINED = ''
 # Checkpoint to resume, could be overwritten by command line argument
 _C.MODEL.RESUME = ''
 # Number of classes, overwritten in data preparation
-_C.MODEL.NUM_CLASSES = 10
+_C.MODEL.NUM_CLASSES = 20
 # Dropout rate
 _C.MODEL.DROP_RATE = 0.0
 # Drop path rate
@@ -87,7 +87,7 @@ _C.MODEL.SWIN.AZIMUTH_CUTS = 128
 _C.MODEL.SWIN.APE = False
 _C.MODEL.SWIN.PATCH_NORM = True
 _C.MODEL.SWIN.FINAL_UPSAMPLE= "expand_first"
-_C.MODEL.DISTORTION = 'polynomial'
+_C.MODEL.DISTORTION = 'spherical'
 
 
 # Swin MLP parameters

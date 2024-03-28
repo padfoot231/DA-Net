@@ -1,4 +1,6 @@
 from PIL import Image
+from envmap import EnvironmentMap
+from envmap import rotation_matrix
 import torch
 import torch.nn as nn
 import pickle as pkl
@@ -17,6 +19,73 @@ from utils import get_sample_params_from_subdiv
 from torchvision.transforms import transforms
 t2pil = transforms.ToTensor()
 pil = transforms.ToPILImage()
+
+
+
+def sph2cart(az, el, r):
+    x = r * np.cos(el) * np.cos(az)
+    y = r * np.cos(el) * np.sin(az)
+    z = r * np.sin(el)
+    return x, y, z
+
+#rad
+def compute_focal(fov, xi, width):
+    return width / 2 * (xi + np.cos(fov/2)) / np.sin(fov/2)
+
+#order 0:nearest 1:bilinear
+def warpToFisheye(pano,outputdims,viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(0), np.deg2rad(0)],xi=0.9, fov=150, order=1):
+
+    outputdims1=outputdims[0]
+    outputdims2=outputdims[1]
+   
+    pitch, yaw, roll = np.array(viewingAnglesPYR)
+    #print(pano.shape)
+    # breakpoint()
+    e = EnvironmentMap(pano, format_='latlong')
+    e = e.rotate(rotation_matrix(yaw, -pitch, -roll).T)
+    r_max = max(outputdims1/2,outputdims2/2)
+
+    h= min(outputdims1,outputdims2)
+    f = compute_focal(np.deg2rad(fov),xi,h)
+    
+    t = np.linspace(0,fov/2, 100)
+   
+
+    #test spherical
+    # print('xi  {}, f {}'.format(xi,f))
+    theta= np.deg2rad(t)
+    funT = (f* np.sin(theta))/(np.cos(theta)+xi)
+    funT= funT/r_max
+
+
+    #creates the empty image
+    [u, v] = np.meshgrid(np.linspace(-1, 1, outputdims1), np.linspace(-1, 1, outputdims2))
+    r = np.sqrt(u ** 2 + v ** 2)
+    phi = np.arctan2(v, u)
+    validOut = r <= 1
+    # interpolate the _inverse_ function!
+    fovWorld = np.deg2rad(np.interp(x=r, xp=funT, fp=t))
+    # fovWorld = np.pi / 2 - np.arccos(r)
+    FOV = np.rad2deg((fovWorld))
+
+    el = fovWorld + np.pi / 2
+
+    # convert to XYZ
+    #ref
+    x, y, z = sph2cart(phi, fovWorld + np.pi / 2, 1)
+
+    x = -x
+    z = -z
+
+    #return values in [0,1]
+    #the source pixel from panorama 
+    [u1, v1] = e.world2image(x, y, z)
+    # breakpoint()
+    # Interpolate
+    #validout to set the background to black (the circle part)
+    eOut= e.interpolate(u1, v1, validOut, order)
+    #eOut= e.interpolate(u1, v1)
+    return eOut.data, f
 
 def KMeans(x, c, K=10, Niter=10, verbose=True):
     """Implements Lloyd's algorithm for the Euclidean metric."""
@@ -75,16 +144,26 @@ x_ = grid_x.reshape(H*W, 1)
 y_ = grid_y.reshape(H*W, 1)
 grid_pix = torch.cat((x_, y_), dim=1).type(torch.float32)
 grid_pix = grid_pix.reshape(1, H*W, 2).cuda("cuda:0")
-
-for i in range(len(key)):
-    print(key[i])
-    D = torch.tensor(data[key[i]].reshape(1,4).transpose(1,0)).cuda("cuda:0")
+dist = {}
+image = Image.open('/home-local2/akath.extra.nobkp/CVRG-Pano/all-rgb/img-260.png')
+image = np.array(image)
+with open('/home-local2/akath.extra.nobkp/CVRG-Pano/val.pkl', 'rb') as f:
+    data = pkl.load(f)
+h= 128
+fov= 170
+dist = []
+for i in range(len(data)):
+    # print(key[i])
+    xi = np.random.uniform(0.83, 0.9)
+    im, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(0), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
+    # D = torch.tensor(data[key[i]].reshape(1,4).transpose(1,0)).cuda("cuda:0")
     # D = np.array([1.0, 0.0, 0.0, 0.0])
     # D = torch.tensor(D.reshape(1,4).transpose(1,0)).cuda("cuda:0")
+    D = torch.tensor([ xi, f,  2.9671]).reshape(1, 3).transpose(0,1).cuda()
     azimuth_subdiv = H
     radius_subdiv = W//4
-    n_radius = 8
-    n_azimuth = 8
+    n_radius = 10
+    n_azimuth = 10
     subdiv = (radius_subdiv*n_radius, azimuth_subdiv*n_azimuth)
     # subdiv = 3
 
@@ -93,7 +172,7 @@ for i in range(len(key)):
     xc, yc, theta_max = get_sample_params_from_subdiv(
         subdiv=subdiv,
         img_size=img_size,
-        distortion_model = 'polynomial',
+        distortion_model = 'spherical',
         D = D, 
         n_radius=n_radius,
         n_azimuth=n_azimuth,
@@ -115,8 +194,13 @@ for i in range(len(key)):
     # cl = np.array(cl.cpu())
     cl = cl[0].cpu()    
     # breakpoint()
-    np.save('/home-local2/akath.extra.nobkp/woodscape/matrix_8/8_8_' + str(key[i]) + '.pkl', cl)
+    # breakpoint()
+    dist.append([cl, f, xi])
+    # np.save('/home-local2/akath.extra.nobkp/woodscape/matrix_8/8_8_' + str(key[i]) + '.pkl', cl)
     print(i)
+
+with open('/home-local2/akath.extra.nobkp/CVRG-Pano/10_10_cl_val.pkl', 'wb') as f:
+    data = pkl.dump(dist, f)
 
 
 

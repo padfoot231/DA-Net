@@ -176,8 +176,12 @@ Distortion= {
 
 
 #CVRGpano
-mean = [0.3742, 0.3776, 0.3574]
-std = [0.2792, 0.2748, 0.2866]
+# mean = [0.3742, 0.3776, 0.3574]
+# std = [0.2792, 0.2748, 0.2866]
+
+#CVRGpano highdistort
+mean = [0.3977, 0.4041, 0.4012]
+std = [0.2794, 0.2807, 0.2894]
 
 #Matterport
 # mean= [0.2217, 0.1939, 0.1688]
@@ -189,7 +193,7 @@ normalize= transforms.Normalize(
             std= std )
 #normalize = None
 class CVRG(Dataset):
-    def __init__(self, base_dir, split, xi, model= "spherical", img_size = 128, fov = 0.2, high=0.0, low=0.35, transform=None):
+    def __init__(self, base_dir, split, xi=0.0, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
         self.fov = fov
         self.transform = transform  # using transform in torch!
         self.split = split
@@ -204,15 +208,13 @@ class CVRG(Dataset):
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/matrix_train.pkl', 'rb') as f:
+            with open(base_dir + '/10_10_cl_train.pkl', 'rb') as f:
                 dist = pkl.load(f)
-            keys = list(dist.keys())
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/matrix_val.pkl', 'rb') as f:
+            with open(base_dir + '/10_10_cl_val.pkl', 'rb') as f:
                 dist = pkl.load(f)
-                keys = list(dist.keys())
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
                 data = pkl.load(f)
@@ -222,7 +224,6 @@ class CVRG(Dataset):
 
         self.data = data[:4] #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
         self.dist = dist
-        self.keys = keys
 
         # if self.calib is None and os.path.exists(self.data_dir+ '/calib_gp2.pkl') :
         #     with open(self.data_dir + '/calib_gp2.pkl', 'rb') as f:
@@ -245,7 +246,7 @@ class CVRG(Dataset):
             if self.split == 'train' or self.split == 'val':
                 img_path = self.data_dir + '/train/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/train/mask/' + self.data[idx]
-                idx = random.randint(0, len(self.keys))
+                i = random.randint(0, len(self.dist) - 1)
             elif self.split == 'test':
                 img_path = self.data_dir + '/test/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/test/mask/' + self.data[idx]
@@ -256,9 +257,8 @@ class CVRG(Dataset):
         image = np.array(image)
         segm= Image.open(sem_path).convert('L')
         segm = np.array(segm)
-        # segm = segm_transform(segm)
         segm = segm.reshape(832, 1664, 1)
-        cls = self.dist[keys[0]]
+        cls = self.dist[i][0]
         # mat_path= img_path.replace('png','npy')
         #cl= np.load(mat_path)
 
@@ -270,9 +270,9 @@ class CVRG(Dataset):
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
                 # xi= self.xi
-                xi = float(keys[idx].split('_')[0])
-                # print(xi, fov)
+                xi = self.dist[i][2]
                 deg = random.uniform(0, 360)
+                # print(xi, fov, deg)
             elif self.split=='test':
                 xi= self.xi
                 deg = 0
@@ -280,12 +280,12 @@ class CVRG(Dataset):
             image, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
             segm,_= warpToFisheye(segm, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=0)
             dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
+            assert f == self.dist[i][1]
             segm = segm.astype(np.uint8)
             # print(xi, f, fov, h, deg)
         #resizing to image_size
         #image = resize(image,(self.img_size, self.img_size), order=1)
         #label= resize(depth,(self.img_size, self.img_size), order=0)
-
         image = cv2.resize(image, (self.img_size,self.img_size),interpolation = cv2.INTER_LINEAR).astype(np.uint8)
         label= cv2.resize(segm, (self.img_size,self.img_size), interpolation = cv2.INTER_NEAREST)
         image = T(image)
@@ -302,7 +302,8 @@ class CVRG(Dataset):
         ############################################# masks ############################################################
         #sample = {'image': image, 'label': label, 'path':b_path.replace('png','npy')}
         sample = {'image': image, 'label': label}
-        if self.transform:
+        # if self.transform:
+        if None:    
             sample = self.transform(sample)
         else:
             sample['image']= image.type(torch.float32)
@@ -343,7 +344,7 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/home/prongs/scratch/CVRG-Pano'
+    root_path= '/home-local2/akath.extra.nobkp/CVRG-Pano'
     breakpoint()
     db= CVRG(root_path, split="train", transform=None)
     # mean,std= get_mean_std(root_path)

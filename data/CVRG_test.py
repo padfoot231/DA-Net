@@ -24,12 +24,13 @@ T = transforms.ToTensor()
 
 def random_rot_flip(image, label):
     k = np.random.randint(0, 4)
-    image = np.rot90(image, k)
-    label = np.rot90(label, k)
-    axis = np.random.randint(0, 2)
-    image = np.flip(image, axis=axis).copy()
-    label = np.flip(label, axis=axis).copy()
+    image = torch.rot90(image, k, dims=[1, 2])
+    label = torch.rot90(label, k, dims=[0, 1])
+    axis = np.random.randint(1, 3)
+    image = torch.flip(image, dims=[1,2])
+    label = torch.flip(label, dims=[0,1])
     return image, label
+
 
 def img_transform(img):
     # 0-255 to 0-1
@@ -40,9 +41,9 @@ def img_transform(img):
     
 def random_rotate(image, label):
     angle = np.random.randint(-20, 20)
-    image = ndimage.rotate(image, angle, order=1, reshape=False)
-    label = ndimage.rotate(label, angle, order=0, reshape=False)
-    return image, label
+    image = transforms.functional.rotate(image, angle)
+    label = transforms.functional.rotate(label.reshape(1, label.shape[0], label.shape[1]), angle)
+    return image, label[0]
 
 #'png'
 def load_color(filename: str) -> torch.Tensor:    
@@ -175,8 +176,12 @@ Distortion= {
 
 
 #CVRGpano
-mean = [-1.1691, -1.1035, -0.9122]
-std = [0.0057, 0.0061, 0.0060]
+# mean = [0.3742, 0.3776, 0.3574]
+# std = [0.2792, 0.2748, 0.2866]
+
+#CVRGpano highdistort
+mean = [0.3977, 0.4041, 0.4012]
+std = [0.2794, 0.2807, 0.2894]
 
 #Matterport
 # mean= [0.2217, 0.1939, 0.1688]
@@ -187,9 +192,9 @@ normalize= transforms.Normalize(
             mean= mean ,
             std= std )
 #normalize = None
-class Synapse_dataset(Dataset):
-    def __init__(self, base_dir, split, model= "spherical", img_size = 128, low = 0.2, high=0.35, xi=0.0, transform=None):
-        self.xi = xi
+class CVRG(Dataset):
+    def __init__(self, base_dir, split, xi=0.0, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
+        self.fov = fov
         self.transform = transform  # using transform in torch!
         self.split = split
         self.model= model
@@ -197,14 +202,19 @@ class Synapse_dataset(Dataset):
         self.data_dir = base_dir
         self.calib = None
         self.low = low
+        self.xi = xi
         self.high = high
         
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 data = pkl.load(f)
+            with open(base_dir + '/10_10_cl_train.pkl', 'rb') as f:
+                dist = pkl.load(f)
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 data = pkl.load(f)
+            with open(base_dir + '/10_10_cl_val.pkl', 'rb') as f:
+                dist = pkl.load(f)
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
                 data = pkl.load(f)
@@ -212,7 +222,8 @@ class Synapse_dataset(Dataset):
             # with open(self.data_dir + '/test_calib.pkl', 'rb') as f:
             #     self.calib = pkl.load(f)
 
-        self.data = data #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
+        self.data = data[:4] #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
+        self.dist = dist
 
         # if self.calib is None and os.path.exists(self.data_dir+ '/calib_gp2.pkl') :
         #     with open(self.data_dir + '/calib_gp2.pkl', 'rb') as f:
@@ -235,16 +246,19 @@ class Synapse_dataset(Dataset):
             if self.split == 'train' or self.split == 'val':
                 img_path = self.data_dir + '/train/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/train/mask/' + self.data[idx]
+                i = random.randint(0, len(self.dist) - 1)
             elif self.split == 'test':
                 img_path = self.data_dir + '/test/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/test/mask/' + self.data[idx]
         # image= load_color(img_path)['color']
         image = Image.open(img_path)
-        image = transforms.ToTensor()(image)
-        image = image.permute(1, 2, 0)
+        # image = transforms.ToTensor()(image)
+        # image = image.permute(1, 2, 0)
+        image = np.array(image)
         segm= Image.open(sem_path).convert('L')
-        segm = segm_transform(segm)
+        segm = np.array(segm)
         segm = segm.reshape(832, 1664, 1)
+        cls = self.dist[i][0]
         # mat_path= img_path.replace('png','npy')
         #cl= np.load(mat_path)
 
@@ -252,69 +266,73 @@ class Synapse_dataset(Dataset):
         # segm=segm.permute(1,2,0)
         if self.model == "spherical":
             h= self.img_size
-            fov=90
+            fov=self.fov
+            # print("field of view", fov)
             if self.split=='train' or self.split=='val':
-                xi= random.uniform(self.low,self.high)
+                # xi= self.xi
+                xi = self.dist[i][2]
                 deg = random.uniform(0, 360)
+                # print(xi, fov, deg)
             elif self.split=='test':
-                # print("this is test", self.xi)
-                xi= 0
+                xi= self.xi
                 deg = 0
             # print(xi, deg)
-            image, f = warpToFisheye(image.numpy(), viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
-            segm,_= warpToFisheye(segm.numpy(), viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=0)
-            dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)])
+            image, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
+            segm,_= warpToFisheye(segm, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=0)
+            dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
+            assert f == self.dist[i][1]
             segm = segm.astype(np.uint8)
             # print(xi, f, fov, h, deg)
         #resizing to image_size
+            l = [cls, dist]
+            with open('text.pkl', 'wb') as f:
+                pkl.dump(l, f)
+        breakpoint()
+        # im = Image.fromarray(image)
+
         #image = resize(image,(self.img_size, self.img_size), order=1)
         #label= resize(depth,(self.img_size, self.img_size), order=0)
-        breakpoint()
-        image = cv2.resize(image, (self.img_size,self.img_size),interpolation = cv2.INTER_LINEAR)
+        image = cv2.resize(image, (self.img_size,self.img_size),interpolation = cv2.INTER_LINEAR).astype(np.uint8)
         label= cv2.resize(segm, (self.img_size,self.img_size), interpolation = cv2.INTER_NEAREST)
-
-        im = Image.fromarray(image)
-        label 
-        # ############################################# masks ############################################################
-        # res = 1024
-        # cartesian = torch.cartesian_prod(
-        #     torch.linspace(-1, 1, res),
-        #     torch.linspace(1, -1, res)
-        # ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
-        # radius = cartesian.norm(dim=0)
-        # mask = (radius > 0.0) & (radius < 1) 
-        # mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (self.img_size), mode="nearest")
-        # ############################################# masks ############################################################
-        # #sample = {'image': image, 'label': label, 'path':b_path.replace('png','npy')}
-        # sample = {'image': image, 'label': label}
-        
-        # if self.transform:
-        #     sample = self.transform(sample)
-        # else:
-        #     sample['image']= torch.from_numpy(image.astype(np.float32)/(255.0))
-        #     sample['label']= torch.from_numpy(label.astype(np.uint8))
-        
-        # one_hot = F.one_hot(sample['label'].to(torch.int64), num_classes=20)
+        image = T(image)
+        label = segm_transform(label)
+        ############################################# masks ############################################################
+        res = 1024
+        cartesian = torch.cartesian_prod(
+            torch.linspace(-1, 1, res),
+            torch.linspace(1, -1, res)
+        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+        radius = cartesian.norm(dim=0)
+        mask = (radius > 0.0) & (radius < 1) 
+        mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (self.img_size), mode="nearest")
+        ############################################# masks ############################################################
+        #sample = {'image': image, 'label': label, 'path':b_path.replace('png','npy')}
+        sample = {'image': image, 'label': label}
+        if self.transform:
+            sample = self.transform(sample)
+        else:
+            sample['image']= image.type(torch.float32)
+            sample['label']= label.type(torch.uint8)
+        one_hot = F.one_hot(sample['label'].to(torch.int64), num_classes=20).to(torch.float32)
         # sample['image']= sample['image'].permute(2,0,1)
-        # # sample['label']= sample['label']
+        # sample['label']= sample['label']
 
-        # sample['dist'] = dist
-        # #sample['cl'] = cl 
-        # #print(sample['dist'])x``
+        sample['dist'] = dist
+        #print(sample['dist'])x``
         
 
-        # #sample['label']= sample['label'].squeeze(0)
+        #sample['label']= sample['label'].squeeze(0)
 
-        # if normalize is not None:
-        #     sample['image']= normalize(sample['image'])
-        # sample['one_hot'] = one_hot
-        # sample['mask'] = mask1[0].to(torch.long)
+        if normalize is not None:
+            sample['image']= normalize(sample['image'])
+        sample['one_hot'] = one_hot
+        sample['mask'] = mask1[0].to(torch.long)
 
         #print(sample.keys())
-        return image, lable
+        return sample['image'], sample['label'], sample['dist'] , cls, sample['mask'], one_hot
 
 def get_mean_std(base_dir ):
-    db= Synapse_dataset(base_dir, split="train", transform=None)
+    db= CVRG(base_dir, split="train", transform=None)
     print(len(db))
     #sample= db.__getitem__(0)
     #print(sample['image'].shape)
@@ -322,7 +340,7 @@ def get_mean_std(base_dir ):
     #print(sample['dist'].shape)
     loader = DataLoader(db, batch_size=len(db), shuffle=False,num_workers=0)
     im_lab_dict = next(iter(loader))
-    images, labels = im_lab_dict['image'], im_lab_dict['label']
+    images, labels, dist, cls, mask, one_hot = im_lab_dict
     # shape of images = [b,c,w,h]
     mean, std = images.mean([0,2,3]), images.std([0,2,3])
     print("mean",mean)
@@ -331,12 +349,12 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/home/prongs/scratch/CVRG-Pano'
-    db= Synapse_dataset(root_path, split="train", transform=None)
-    # mean,std= get_mean_std(root_path)
-    img = db[0]
+    root_path= '/home-local2/akath.extra.nobkp/CVRG-Pano'
     breakpoint()
-
+    db= CVRG(root_path, split="train", transform=None)
+    # mean,std= get_mean_std(root_path)
+    db[0]
+    breakpoint()
     print("end")
 
 #     mean tensor([0.9735, 1.2531, 1.3141])

@@ -196,7 +196,6 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         ###############
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
-        # breakpoint()
         # dist = dist.cuda(non_blocking=True)   
         cls = cls.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
@@ -233,7 +232,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         scaler_meter.update(loss_scale_value)
         batch_time.update(time.time() - end)
         end = time.time()
-        if (idx) % 100 ==0:
+        if (idx) % 1 ==0:
             # breakpoint()
             # image= images[0,...].permute(1,2,0)
             # image*= torch.tensor(std).cuda(cuda_id)
