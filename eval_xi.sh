@@ -1,14 +1,20 @@
 #!/bin/bash 
 export WANDB_MODE="disabled"
 
+for i in $(seq 0.0 0.1 0.9)
+do 
+    echo $i
+    python -m torch.distributed.launch \
+    --nproc_per_node 1 \
+    --master_port 12345  main.py --eval \
+    --cfg configs/swin/CVRG_den_unet.yaml \
+    --data-path  $SLURM_TMPDIR/data/CVRG-Pano \
+    --resume /home/prongs/scratch/Radial-unet/woodscape_den_unet_new/default/ckpt_epoch_610.pth \
+    --output /home/prongs/scratch/Radial-eval \
+    --fov 170.0 \
+    --xi $i \
+    --batch-size 1
+done
 
-python -m torch.distributed.launch \
---nproc_per_node 1 \
---master_port 12345  main.py --eval \
---cfg configs/swin/DDM.yaml \
---output /home-local2/akath.extra.nobkp/Radial-unet \
---data-path /home-local2/akath.extra.nobkp/CVRG-Pano \
---resume /home-local2/akath.extra.nobkp/Radial-unet/DDM/default/ckpt_epoch_670.pth \
---fov 170.0 \
---xi 0.5 \
---batch-size 1
+
+# /home/prongs/scratch/Radial-unet/swin/default/ckpt_epoch_1800.pth

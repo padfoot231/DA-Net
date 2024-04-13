@@ -161,11 +161,12 @@ def main(config):
 
         train_one_epoch(config, model, ce_loss, dice_loss, data_loader_train, optimizer, epoch, mixup_fn,lr_scheduler,
                         loss_scaler)
-        if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
-            save_checkpoint(config, epoch, model_without_ddp, max_miou, optimizer, lr_scheduler, loss_scaler,
-                            logger)
 
         miou, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
+        
+        if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
+            save_checkpoint(config, epoch, model_without_ddp, max_miou, miou, optimizer, lr_scheduler, loss_scaler,
+                            logger)
         # acc1_test, acc5_test, loss_test = test(config, data_loader_test, model)
         logger.info(f"Mean IOU of the network on the {len(dataset_val)} test images: {miou:.4f}%")
         max_miou = max(max_miou, miou)
@@ -205,7 +206,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
         outputs[:, :, mask[0, 0] == 0] = one_hot[:, :, mask[0, 0] == 0]
         
-        
+        # breakpoint()
         loss_ce = ce_loss(outputs, targets[:].long())
         loss_dice = dice_loss(outputs, targets, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
@@ -232,7 +233,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         scaler_meter.update(loss_scale_value)
         batch_time.update(time.time() - end)
         end = time.time()
-        if (idx) % 1 ==0:
+        if (idx) % 50 ==0:
             # breakpoint()
             # image= images[0,...].permute(1,2,0)
             # image*= torch.tensor(std).cuda(cuda_id)
@@ -292,7 +293,7 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
         # compute output
         # with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
         output = model(images, dist, cls)
-            
+        # breakpoint()
         B, _, _, _ = images.shape
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
         output[:, :, mask[0, 0] == 0] = one_hot[:, :, mask[0, 0] == 0]
@@ -322,11 +323,12 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
             image= images[0,...].permute(1,2,0)
             image*= torch.tensor(std).cuda()
             image+= torch.tensor(mean).cuda()
-            plt.imsave(config.OUTPUT+ '/' +  '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
+            plt.imsave(config.OUTPUT+ '/' + '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
+            # + str(config.DATA.XI) + '/' +  
             label = target[0].detach().cpu().numpy()
-            plt.imsave(config.OUTPUT+ '/' +  '/val_label_{}.png'.format(idx), label.astype(np.uint8))
+            plt.imsave(config.OUTPUT+ '/val_label_{}.png'.format(idx), label.astype(np.uint8))
             pred= output.argmax(1)[0].cpu().detach().numpy()
-            plt.imsave(config.OUTPUT+ '/' +  '/val_pred_{}.png'.format(idx), pred)
+            plt.imsave(config.OUTPUT+ '/val_pred_{}.png'.format(idx), pred)
 
         if idx % config.PRINT_FREQ == 0:
             memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)

@@ -1,6 +1,6 @@
 MODEL:
   TYPE: swin_unet
-  NAME: swin_new
+  NAME: swin
   DROP_PATH_RATE: 0.2
   SWIN:
     EMBED_DIM: 96
@@ -9,7 +9,5 @@ MODEL:
     NUM_HEADS: [ 3, 6, 12, 24 ]
     WINDOW_SIZE_GRID: 4
 DATA:
-  HIGH: 0.8
-  LOW: 0.93
-  FOV: 170
-  DATASET: CVRG
+  HIGH: 0.0
+  LOW: 0.05

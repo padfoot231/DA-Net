@@ -121,7 +121,7 @@ class Woodscape_dataset(Dataset):
     def __getitem__(self, idx):
         img_path = self.data_dir + '/rgb_images/' + self.data[idx]
         lbl_path = self.data_dir + '/gtLabels/' + self.data[idx]
-        mat_path = self.data_dir + '/matrix_10/'+ '1_4_' + self.data[idx][:-4] + '_img.png.pkl.npy'
+        mat_path = self.data_dir + '/matrix_r_theta_10/'+ '1_4_' + self.data[idx][:-4] + '_img.png.pkl.npy'
         img = Image.open(img_path).convert('RGB')
         segm = Image.open(lbl_path).convert('L')
         key = self.data[idx][:-4] + '_img.png'

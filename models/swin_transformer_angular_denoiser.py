@@ -12,7 +12,7 @@ import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils import get_sample_params_from_subdiv
+from utils_tan import get_sample_params_from_subdiv
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -994,6 +994,8 @@ class swin_transformer_angular_denoiser(nn.Module):
         x = self.up_x4(x)
         x = restruct(x, cls, self.embed_dim, self.img_size, self.img_size)
         x = self.output(x)
+        print("ass")
+        breakpoint()
         x = self.final(x)
         return x
 

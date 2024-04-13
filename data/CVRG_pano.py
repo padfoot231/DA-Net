@@ -208,21 +208,23 @@ class CVRG(Dataset):
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/10_10_cl_train.pkl', 'rb') as f:
+            with open(base_dir + '/20_5_cl_train.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/10_10_cl_val.pkl', 'rb') as f:
+            with open(base_dir + '/20_5_cl_val.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
                 data = pkl.load(f)
+            with open(base_dir + '/10_10_cl_test.pkl', 'rb') as f:
+                dist = pkl.load(f)
 
             # with open(self.data_dir + '/test_calib.pkl', 'rb') as f:
             #     self.calib = pkl.load(f)
 
-        self.data = data[:4] #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
+        self.data = data #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
         self.dist = dist
 
         # if self.calib is None and os.path.exists(self.data_dir+ '/calib_gp2.pkl') :
@@ -247,9 +249,11 @@ class CVRG(Dataset):
                 img_path = self.data_dir + '/train/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/train/mask/' + self.data[idx]
                 i = random.randint(0, len(self.dist) - 1)
+                cls = self.dist[i][0]
             elif self.split == 'test':
                 img_path = self.data_dir + '/test/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/test/mask/' + self.data[idx]
+                
         # image= load_color(img_path)['color']
         image = Image.open(img_path)
         # image = transforms.ToTensor()(image)
@@ -258,29 +262,36 @@ class CVRG(Dataset):
         segm= Image.open(sem_path).convert('L')
         segm = np.array(segm)
         segm = segm.reshape(832, 1664, 1)
-        cls = self.dist[i][0]
         # mat_path= img_path.replace('png','npy')
         #cl= np.load(mat_path)
 
         # image=image.permute(1,2,0)
         # segm=segm.permute(1,2,0)
         if self.model == "spherical":
-            h= self.img_size
+            # h= self.img_size
+            h = 512
             fov=self.fov
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
                 # xi= self.xi
-                xi = self.dist[i][2]
+                xi = self.dist[idx][2]
                 deg = random.uniform(0, 360)
                 # print(xi, fov, deg)
             elif self.split=='test':
                 xi= self.xi
                 deg = 0
+                # print("xi, deg")
+                cls = self.dist[xi][0]
+
             # print(xi, deg)
             image, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
             segm,_= warpToFisheye(segm, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=0)
             dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
-            assert f == self.dist[i][1]
+            if self.split=='train' or self.split=='val':
+                # print(f/(h/self.img_size), self.dist[idx][1])
+                assert f/(h/self.img_size) == self.dist[idx][1]
+                # print(f, self.dist[xi][1])
+                # assert f == self.dist[xi][1]         
             segm = segm.astype(np.uint8)
             # print(xi, f, fov, h, deg)
         #resizing to image_size

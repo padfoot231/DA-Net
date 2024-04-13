@@ -982,7 +982,7 @@ if __name__=='__main__':
                         embed_dim=96,
                         depths=[2, 2, 18, 2],
                         num_heads=[3, 6, 12, 24],
-                        distortion_model='spherical', 
+                        distortion_model='polynomial', 
                         window_size=(1, 16),
                         mlp_ratio=4,
                         qkv_bias=True,
@@ -992,8 +992,8 @@ if __name__=='__main__':
                         ape=False,
                         patch_norm=True,
                         use_checkpoint=False,
-                        n_radius = 20,
-                        n_azimuth = 5)
+                        n_radius = 10,
+                        n_azimuth = 10)
     model = model.cuda()
     
 
@@ -1008,15 +1008,9 @@ if __name__=='__main__':
 
     # dist = data[1]
     # dist = torch.tensor(dist).reshape(1, 3).cuda()
-    # breakpoint()
+    breakpoint()
     dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/20_5_cl_train.pkl', 'rb') as f:
-        data = pkl.load(f)
-    xi = data[0][2]
-    f = data[0][1]
-    cls = data[0][0]
-    dist = torch.tensor(np.array([xi, f,  2.96706]).reshape(1, 3)).float().cuda()
-    # cls = np.load('key_10t10_1.pkl.npy')
+    cls = np.load('1_4_04087_FV_img.png.pkl.npy')
     # cls = data[0]
     breakpoint()
     cls = cls.reshape(1, cls.shape[0], cls.shape[1])

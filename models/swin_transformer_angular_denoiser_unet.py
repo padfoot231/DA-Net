@@ -12,7 +12,7 @@ import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils import get_sample_params_from_subdiv
+from utils_tan import get_sample_params_from_subdiv
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -66,6 +66,7 @@ def R(window_size, num_heads, radius, D, a_r, b_r, r_max):
     A_r = a_r*torch.cos(radius*2*pi/r_max) + b_r*torch.sin(radius*2*pi/r_max)
     
     return A_r
+
 
 def theta(window_size, num_heads, radius, theta_max, a_r, b_r, H): # change theta_max to D
     a_r = a_r[radius]
@@ -163,8 +164,6 @@ class WindowAttention(nn.Module):
 
         self.distortion_model = distortion_model
         # define a parameter table of relative position bias
-        # self.relative_position_bias_table = nn.Parameter(
-        #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
         # self.a_p = nn.Parameter(
         #     torch.zeros(self.P+1, num_heads))
         # self.b_p = nn.Parameter(
@@ -242,9 +241,12 @@ class WindowAttention(nn.Module):
         # relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
         #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        # A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1], self.P)
+        # A_theta = theta(self.window_size, self.num_heads, self.radius, theta_max, self.a_r, self.b_r, self.input_resolution[0], self.P) # change input_resolution[0] to r_max
+        
         A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1])
         A_theta = theta(self.window_size, self.num_heads, self.radius, theta_max, self.a_r, self.b_r, self.input_resolution[0]) # change input_resolution[0] to r_max
-        
+
         attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0).contiguous() + A_theta.transpose(1, 2).transpose(0, 1).unsqueeze(0).contiguous()
 
         if mask is not None:
@@ -773,7 +775,7 @@ class PatchEmbed(nn.Module):
         # subdiv = 3
         self.n_radius = n_radius
         self.n_azimuth = n_azimuth
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=n_radius, stride=n_radius)
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=(n_radius, n_azimuth), stride=(n_radius, n_azimuth))
 
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
@@ -782,7 +784,7 @@ class PatchEmbed(nn.Module):
 
     def forward(self, x, dist):
         B, C, H, W = x.shape
-
+        # print("ass")
         dist = dist.transpose(1,0)
         radius_buffer, azimuth_buffer = 0, 0
         xc, yc, theta_max = get_sample_params_from_subdiv(
@@ -1011,6 +1013,7 @@ class swin_transformer_angular_denoiser_unet(nn.Module):
         x = self.up_x4(x)
         x = restruct(x, cls, self.embed_dim, self.img_size, self.img_size)
         # breakpoint()
+        # print("ass")
         x = self.output(x)
         x = self.final(x)
         return x

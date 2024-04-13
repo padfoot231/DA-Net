@@ -13,6 +13,13 @@ import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from utils import get_sample_params_from_subdiv
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+
 pi = 3.141592653589793
 
 
@@ -299,7 +306,14 @@ class SwinTransformerBlock(nn.Module):
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
-        # import pdb;pdb.set_trace()
+        if self.input_resolution[0]*self.input_resolution[1] < self.window_size[0]*self.window_size[1]:
+            self.window_size = self.input_resolution
+            self.shift_size = (0, 0)
+            self.attn = WindowAttention(
+            patch_size, input_resolution, dim, window_size=self.window_size, num_heads=num_heads,
+            qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, distortion_model=distortion_model)
+            assert 0 <= self.shift_size[0] < self.window_size[0], "shift_size must in 0-window_size[0]"
+
         if self.input_resolution[1] < self.window_size[1]:  #azimuth values is input_resolution[1] window starts including radius
             residue = self.window_size[1]//self.input_resolution[1]
             self.window_size = (self.window_size[0]*residue, self.window_size[1]//residue)
@@ -308,6 +322,7 @@ class SwinTransformerBlock(nn.Module):
             patch_size, input_resolution, dim, window_size=self.window_size, num_heads=num_heads,
             qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, distortion_model=distortion_model)
             assert 0 <= self.shift_size[0] < self.window_size[0], "shift_size must in 0-window_size[0]"
+
         else: #window along pure azimuth 
             self.attn = WindowAttention(
             patch_size, input_resolution, dim, window_size=to_2tuple(self.window_size), num_heads=num_heads,
@@ -444,15 +459,11 @@ class PatchMerging(nn.Module):
         x: B, H*W, C
         D:, B, H, W
         """
-        # import pdb;pdb.set_trace()
         H, W = self.input_resolution
-        # print(self.input_resolution)
         B, L, C = x.shape
         assert L == H * W, "input feature has wrong size"
-        assert H % 2 == 0 and W % 2 == 0, f"x size ({H}*{W}) are not even."
-
+        # assert H % 2 == 0 and W % 2 == 0, f"x size ({H}*{W}) are not even."
         x = x.view(B, H, W, C)
-
         if W>=4:
             # import pdb;pdb.set_trace()
             x0 = x[:, :, 0::4, :]  # B H/2 W/2 C
@@ -467,7 +478,21 @@ class PatchMerging(nn.Module):
             x = self.reduction(x)
 
             return x
-        elif W<4:
+        elif W == 2:
+            residue = 4//W            
+            x0 = x[:, 0::2, 0::2, :]  # B H/2 W/2 C
+            x1 = x[:, 1::2, 0::2, :]  # B H/2 W/2 C
+            x2 = x[:, 0::2, 1::2, :]  # B H/2 W/2 C
+            x3 = x[:, 1::2, 1::2, :]  # B H/2 W/2 C
+            x = torch.cat([x0, x1, x2, x3], -1)  # B H/2 W/2 4*
+
+            x = x.view(B, -1, 4 * C)  # B H/2*W/2 4*C 
+
+            x = self.norm(x)
+            x = self.reduction(x)
+
+            return x
+        elif W < 2:
             residue = 4//W            
             x0 = x[:, 0::4, :, :]  # B H/2 W/2 C
             x1 = x[:, 1::4, :, :]  # B H/2 W/2 C
@@ -496,6 +521,7 @@ class PatchExpand(nn.Module):
     def __init__(self, input_resolution, dim, dim_scale=2, norm_layer=nn.LayerNorm):
         super().__init__()
         self.input_resolution = input_resolution
+        print(input_resolution)
         self.dim = dim
         self.expand = nn.Linear(dim, 2*dim, bias=False) if dim_scale==2 else nn.Identity()
         self.norm = norm_layer(dim // dim_scale)
@@ -574,8 +600,6 @@ class BasicLayer(nn.Module):
         self.depth = depth
         self.use_checkpoint = use_checkpoint
         self.patch_size = patch_size
-        # print("Basic_Layer", input_resolution)
-        # print("Basic Layer", window_size)
         # build blocks
         self.blocks = nn.ModuleList([
             SwinTransformerBlock(dim=dim, patch_size=patch_size, input_resolution=input_resolution,
@@ -587,7 +611,6 @@ class BasicLayer(nn.Module):
                                  drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
                                  norm_layer=norm_layer, distortion_model=distortion_model)
             for i in range(depth)])
-
         # patch merging layer
         if downsample is not None:
             self.downsample = downsample(input_resolution, dim=dim, norm_layer=norm_layer)
@@ -595,8 +618,6 @@ class BasicLayer(nn.Module):
             self.downsample = None
 
     def forward(self, x, theta_max):
-        # print("basic layer")
-        # import pdb;pdb.set_trace()
         for blk in self.blocks:
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(blk, x, theta_max)
@@ -648,7 +669,6 @@ class BasicLayer_up(nn.Module):
         self.depth = depth
         self.patch_size = patch_size
         self.use_checkpoint = use_checkpoint
-
         # build blocks
         self.blocks = nn.ModuleList([
             SwinTransformerBlock(dim=dim, patch_size=patch_size, input_resolution=input_resolution,
@@ -676,6 +696,37 @@ class BasicLayer_up(nn.Module):
         if self.upsample is not None:
             x = self.upsample(x, theta_max) #here theta_max doesn't do anything 
         return x
+
+class DnCNN(nn.Module):
+
+    def __init__(self, D, C=96, num_classes = 10):
+        super(DnCNN, self).__init__()
+        self.D = D
+
+        # convolution layers
+        self.conv = nn.ModuleList()
+        self.conv.append(nn.Conv2d(C, C, 3, padding=1))
+        self.conv.extend([nn.Conv2d(C, C, 3, padding=1) for _ in range(D)])
+        self.conv.append(nn.Conv2d(C, C, 3, padding=1))
+        # apply He's initialization
+        for i in range(len(self.conv[:-1])):
+            nn.init.kaiming_normal_(
+                self.conv[i].weight.data, nonlinearity='relu')
+
+        # batch normalization
+        self.bn = nn.ModuleList()
+        self.bn.extend([nn.BatchNorm2d(C, C) for _ in range(D)])
+        # initialize the weights of the Batch normalization layers
+        for i in range(D):
+            nn.init.constant_(self.bn[i].weight.data, 1.25 * np.sqrt(C))
+
+    def forward(self, x):
+        D = self.D
+        h = F.relu(self.conv[0](x))
+        for i in range(D):
+            h = F.relu(self.bn[i](self.conv[i+1](h)))
+        y = self.conv[D+1](h) + x
+        return y
 
 class PatchEmbed(nn.Module):
     r""" Image to Patch Embedding
@@ -718,7 +769,7 @@ class PatchEmbed(nn.Module):
         # subdiv = 3
         self.n_radius = n_radius
         self.n_azimuth = n_azimuth
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=n_radius, stride=n_radius)
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=(n_azimuth, n_radius), stride=(n_azimuth, n_radius))
 
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
@@ -747,11 +798,10 @@ class PatchEmbed(nn.Module):
         y_ = y_/(W//2)
         out = torch.cat((y_, x_), dim = 3)
         out = out.cuda()
-
         tensor = nn.functional.grid_sample(x, out, align_corners = True)
-        # tensor = self.proj(tensor).flatten(2).transpose(1, 2)
-        # if self.norm is not None:
-        #     tensor = self.norm(tensor)
+        tensor = self.proj(tensor).flatten(2).transpose(1, 2)
+        if self.norm is not None:
+            tensor = self.norm(tensor)
         return tensor, theta_max
 
     def flops(self):
@@ -762,7 +812,7 @@ class PatchEmbed(nn.Module):
         return flops
 
 
-class SwinTransformerAng(nn.Module):
+class swin_transformer_angular_denoiser(nn.Module):
     r""" Swin Transformer
         A PyTorch impl of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows`  -
           https://arxiv.org/pdf/2103.14030
@@ -841,10 +891,21 @@ class SwinTransformerAng(nn.Module):
         # import pdb;pdb.set_trace()
         # build layers
         self.layers = nn.ModuleList()
+        inp_res  = (patches_resolution[0], patches_resolution[1])
+        prev = []
         for i_layer in range(self.num_layers):
+            prev.append(inp_res)
+            prev_res = inp_res
+            if prev_res[1] > 4 or prev_res[1] == 4: 
+                inp_res =(patches_resolution[0] // (1 ** i_layer), patches_resolution[1] // (4 ** i_layer))
+            elif prev_res[1] == 2:  #azimuth values is input_resolution[1] window starts including radius
+                residue = 4//prev_res[1]
+                inp_res=(prev_res[0]//residue, prev_res[1]//residue)
+            elif prev_res[1] < 2:  #azimuth values is input_resolution[1] window starts including radius
+                residue = 4//prev_res[1]
+                inp_res=(prev_res[0]//4, prev_res[1])
             layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
-                               input_resolution=(patches_resolution[0] // (1 ** i_layer),
-                                                 patches_resolution[1] // (4 ** i_layer)),
+                               input_resolution=inp_res,
                                 patch_size = patch_size,
                                depth=depths[i_layer],
                                num_heads=num_heads[i_layer],
@@ -864,12 +925,10 @@ class SwinTransformerAng(nn.Module):
             concat_linear = nn.Linear(2*int(embed_dim*2**(self.num_layers-1-i_layer)),
             int(embed_dim*2**(self.num_layers-1-i_layer))) if i_layer > 0 else nn.Identity()
             if i_layer ==0 :
-                layer_up = PatchExpand(input_resolution=(patches_resolution[0] // (1 ** (self.num_layers-1-i_layer)),
-                patches_resolution[1] // (2 ** (2*(self.num_layers-1-i_layer)))), dim=int(embed_dim * 2 ** (self.num_layers-1-i_layer)), dim_scale=2, norm_layer=norm_layer)
+                layer_up = PatchExpand(input_resolution=inp_res, dim=int(embed_dim * 2 ** (self.num_layers-1-i_layer)), dim_scale=2, norm_layer=norm_layer)
             else:
                 layer_up = BasicLayer_up(dim=int(embed_dim * 2 ** (self.num_layers-1-i_layer)),
-                                input_resolution=(patches_resolution[0] // (1 ** (self.num_layers-1-i_layer)),
-                                                    patches_resolution[1] // (2 ** (2*(self.num_layers-1-i_layer)))),
+                                input_resolution= prev[-i_layer],
                                 patch_size = patch_size,
                                 depth=depths[(self.num_layers-1-i_layer)],
                                 num_heads=num_heads[(self.num_layers-1-i_layer)],
@@ -890,7 +949,9 @@ class SwinTransformerAng(nn.Module):
         if self.final_upsample == "expand_first":
             print("---final upsample expand_first---")
             self.up = FinalPatchExpand_X4(input_resolution=(patches_resolution[0], patches_resolution[1]),input_dim=embed_dim,dim=embed_dim, n_radius=n_radius, n_azimuth=n_azimuth)
-            self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
+            # self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
+            self.output = DnCNN(D = 2, C = embed_dim, num_classes=self.num_classes)
+            self.final = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
 
 
         self.apply(self._init_weights)
@@ -914,15 +975,15 @@ class SwinTransformerAng(nn.Module):
     
     def forward_features(self, x, dist):
         x, theta_max = self.patch_embed(x, dist)
-        # if self.ape:
-        #     x = x + self.absolute_pos_embed
-        # x = self.pos_drop(x)
-        # x_downsample = []
-        # for layer in self.layers:
-        #     x_downsample.append(x)
-        #     x = layer(x, theta_max)
-        # x = self.norm(x)  # B L C
-        return x, theta_max
+        if self.ape:
+            x = x + self.absolute_pos_embed
+        x = self.pos_drop(x)
+        x_downsample = []
+        for layer in self.layers:
+            x_downsample.append(x)
+            x = layer(x, theta_max)
+        x = self.norm(x)  # B L C
+        return x, x_downsample, theta_max
 
     def forward_up_features(self, x, x_downsample, theta_max):
         for inx, layer_up in enumerate(self.layers_up):
@@ -949,13 +1010,13 @@ class SwinTransformerAng(nn.Module):
             x = x.permute(0,3,1,2).contiguous() #B,C,H,W
         return x
     def forward(self, x, dist, cls):
-        x, theta_max = self.forward_features(x, dist)
-        breakpoint()
-        # x = self.forward_up_features(x ,x_downsample, theta_max)
-        # x = self.up_x4(x)
-
-        img = restruct(x, cls, 3, self.img_size, self.img_size)
-        return x, img
+        x, x_downsample, theta_max = self.forward_features(x, dist)
+        x = self.forward_up_features(x ,x_downsample, theta_max)
+        x = self.up_x4(x)
+        x = restruct(x, cls, self.embed_dim, self.img_size, self.img_size)
+        x = self.output(x)
+        x = self.final(x)
+        return x
 
     def flops(self):
         flops = 0
@@ -967,22 +1028,15 @@ class SwinTransformerAng(nn.Module):
         return flops
 
 if __name__=='__main__':
-    from torchvision import transforms
-    from PIL import Image
-    import pickle as pkl
-
-    T = transforms.ToTensor()
-    pil = transforms.ToPILImage()
-
-    model = SwinTransformerAng(img_size=128,
-                        radius_cuts=32, 
-                        azimuth_cuts=128,
+    model = swin_transformer_angular_denoiser(img_size=64,
+                        radius_cuts=16, 
+                        azimuth_cuts=64,
                         in_chans=3,
                         num_classes=200,
                         embed_dim=96,
                         depths=[2, 2, 18, 2],
                         num_heads=[3, 6, 12, 24],
-                        distortion_model='spherical', 
+                        distortion_model='polynomial', 
                         window_size=(1, 16),
                         mlp_ratio=4,
                         qkv_bias=True,
@@ -992,44 +1046,15 @@ if __name__=='__main__':
                         ape=False,
                         patch_norm=True,
                         use_checkpoint=False,
-                        n_radius = 20,
-                        n_azimuth = 5)
+                        n_radius = 10,
+                        n_azimuth = 10)
     model = model.cuda()
     
 
     t = torch.ones(1, 3, 64, 64).float().cuda()
-    # img = Image.open('../data/296test.png')
-    img = Image.open('04087_FV.png')
-    img = img.resize((128, 128))
-    img = T(img)
-    img = img.unsqueeze(0).cuda()
-    # with open('../data/text.pkl', 'rb') as f:
-    #     data = pkl.load(f)
+    dist = torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(1, 4)).float().cuda()
 
-    # dist = data[1]
-    # dist = torch.tensor(dist).reshape(1, 3).cuda()
-    # breakpoint()
-    dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/20_5_cl_train.pkl', 'rb') as f:
-        data = pkl.load(f)
-    xi = data[0][2]
-    f = data[0][1]
-    cls = data[0][0]
-    dist = torch.tensor(np.array([xi, f,  2.96706]).reshape(1, 3)).float().cuda()
-    # cls = np.load('key_10t10_1.pkl.npy')
-    # cls = data[0]
-    breakpoint()
-    cls = cls.reshape(1, cls.shape[0], cls.shape[1])
-    # breakpoint()
-    pol, cart = model(img, dist, cls)
-    breakpoint()
-    pol = pil(pol[0])
-    cart = pil(cart[0])
-    pol.save('polar_new.png')
-    img = Image.open('04087_FV.png')
-    img = img.resize((128, 128))
-    img.save('296test.png')
-    cart.save('cart.png')
+    m = model(t, dist)
     breakpoint()
     print("ass")
     # import pdb;pdb.set_trace()

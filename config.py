@@ -25,7 +25,7 @@ _C.DATA.BATCH_SIZE = 32
 # Path to dataset, could be overwritten by command line argument
 _C.DATA.DATA_PATH = ''
 # Dataset name
-_C.DATA.DATASET = 'CVRG'
+_C.DATA.DATASET = 'Woodscapes'
 # Input image size
 _C.DATA.IMG_SIZE = 128 ##224 
 # Interpolation to resize image (random, bilinear, bicubic)
@@ -87,7 +87,7 @@ _C.MODEL.SWIN.AZIMUTH_CUTS = 128
 _C.MODEL.SWIN.APE = False
 _C.MODEL.SWIN.PATCH_NORM = True
 _C.MODEL.SWIN.FINAL_UPSAMPLE= "expand_first"
-_C.MODEL.DISTORTION = 'spherical'
+_C.MODEL.DISTORTION = 'polynomial'
 
 
 # Swin MLP parameters
@@ -108,7 +108,7 @@ _C.MODEL.NAZIMUTH = 10
 # -----------------------------------------------------------------------------
 _C.TRAIN = CN()
 _C.TRAIN.START_EPOCH = 0
-_C.TRAIN.EPOCHS = 1200
+_C.TRAIN.EPOCHS = 3000
 _C.TRAIN.WARMUP_EPOCHS = 4
 _C.TRAIN.WEIGHT_DECAY = 0.0001
 _C.TRAIN.BASE_LR = 0.05
