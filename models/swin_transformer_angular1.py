@@ -997,7 +997,7 @@ if __name__=='__main__':
     model = model.cuda()
     
 
-    t = torch.ones(1, 3, 64, 64).float().cuda()
+    t = torch.ones(1, 3, 128, 128).float().cuda()
     # img = Image.open('../data/296test.png')
     img = Image.open('04087_FV.png')
     img = img.resize((128, 128))
