@@ -9,7 +9,7 @@ do
     --master_port 12345  main.py --eval \
     --cfg configs/swin/CVRG_den_unet.yaml \
     --data-path  $SLURM_TMPDIR/data/CVRG-Pano \
-    --resume /home/prongs/scratch/Radial-unet/woodscape_den_unet_new/default/ckpt_epoch_610.pth \
+    --resume /home/prongs/scratch/Radial-unet/woodscape_den_unet_20_5_more/default/ckpt_epoch_1600.pth \
     --output /home/prongs/scratch/Radial-eval \
     --fov 170.0 \
     --xi $i \

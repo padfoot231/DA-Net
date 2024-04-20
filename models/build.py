@@ -23,41 +23,19 @@ import numpy as np
 from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm
 from torch.nn.modules.utils import _pair
 from scipy import ndimage
-from .swin_transformer_angular import SwinTransformerAng
 from .swin_transformer_angular_denoiser_unet import swin_transformer_angular_denoiser_unet
-from .swin_transformer_angular_denoiser import swin_transformer_angular_denoiser
 from .swin_unet import SwinTransformerSys
-from .swin_transformer_polar_denoiser_unet_r_theta import swin_transformer_angular_denoiser_unet_r_theta
-from .swin_transformer_polar_denoiser_unet_r_tan_theta import swin_transformer_polar_denoiser_unet_r_tan_theta
+from .swin_transformer_angular_denoiser_theta import swin_transformer_angular_denoiser_theta
+from .darswin_swin_unet import DarSwin_Unet
+
 
 
 class SwinUnet(nn.Module):
     def __init__(self, config, img_size=224, num_classes=21843, zero_head=False, vis=False):
         super(SwinUnet, self).__init__()
         model_type = config.MODEL.TYPE
-        if model_type == 'swin_ang':
-            self.swin_unet = SwinTransformerAng(img_size=config.DATA.IMG_SIZE,
-                                    radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
-                                    azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,
-                                    in_chans=config.MODEL.SWIN.IN_CHANS,
-                                    num_classes=config.MODEL.NUM_CLASSES,
-                                    embed_dim=config.MODEL.SWIN.EMBED_DIM,
-                                    depths=config.MODEL.SWIN.DEPTHS,
-                                    num_heads=config.MODEL.SWIN.NUM_HEADS,
-                                    window_size=config.MODEL.SWIN.WINDOW_SIZE,
-                                    mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
-                                    qkv_bias=config.MODEL.SWIN.QKV_BIAS,
-                                    qk_scale=config.MODEL.SWIN.QK_SCALE,
-                                    drop_rate=config.MODEL.DROP_RATE,
-                                    drop_path_rate=config.MODEL.DROP_PATH_RATE,
-                                    ape=config.MODEL.SWIN.APE,
-                                    patch_norm=config.MODEL.SWIN.PATCH_NORM,
-                                    use_checkpoint=config.TRAIN.USE_CHECKPOINT,
-                                    distortion_model = config.MODEL.DISTORTION, 
-                                    n_radius = config.MODEL.NRADIUS, 
-                                    n_azimuth = config.MODEL.NAZIMUTH) 
-        elif model_type == 'swin_ang_den':
-            self.swin_unet = swin_transformer_angular_denoiser(img_size=config.DATA.IMG_SIZE,
+        if model_type == 'swin_ang_den_unet_theta':
+            self.swin_unet = swin_transformer_angular_denoiser_theta(img_size=config.DATA.IMG_SIZE,
                                     radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
                                     azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,
                                     in_chans=config.MODEL.SWIN.IN_CHANS,
@@ -98,27 +76,6 @@ class SwinUnet(nn.Module):
                                     distortion_model = config.MODEL.DISTORTION, 
                                     n_radius = config.MODEL.NRADIUS, 
                                     n_azimuth = config.MODEL.NAZIMUTH) 
-        elif model_type == 'swin_ang_den_unet_tan':
-            self.swin_unet = swin_transformer_polar_denoiser_unet_r_tan_theta(img_size=config.DATA.IMG_SIZE,
-                                    radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
-                                    azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,
-                                    in_chans=config.MODEL.SWIN.IN_CHANS,
-                                    num_classes=config.MODEL.NUM_CLASSES,
-                                    embed_dim=config.MODEL.SWIN.EMBED_DIM,
-                                    depths=config.MODEL.SWIN.DEPTHS,
-                                    num_heads=config.MODEL.SWIN.NUM_HEADS,
-                                    window_size=config.MODEL.SWIN.WINDOW_SIZE,
-                                    mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
-                                    qkv_bias=config.MODEL.SWIN.QKV_BIAS,
-                                    qk_scale=config.MODEL.SWIN.QK_SCALE,
-                                    drop_rate=config.MODEL.DROP_RATE,
-                                    drop_path_rate=config.MODEL.DROP_PATH_RATE,
-                                    ape=config.MODEL.SWIN.APE,
-                                    patch_norm=config.MODEL.SWIN.PATCH_NORM,
-                                    use_checkpoint=config.TRAIN.USE_CHECKPOINT,
-                                    distortion_model = config.MODEL.DISTORTION, 
-                                    n_radius = config.MODEL.NRADIUS, 
-                                    n_azimuth = config.MODEL.NAZIMUTH) 
         elif model_type == 'swin_unet':
             self.swin_unet = SwinTransformerSys(img_size=config.DATA.IMG_SIZE,
                         patch_size=config.MODEL.SWIN.PATCH_SIZE,
@@ -136,6 +93,27 @@ class SwinUnet(nn.Module):
                         ape=config.MODEL.SWIN.APE,
                         patch_norm=config.MODEL.SWIN.PATCH_NORM,
                         use_checkpoint=config.TRAIN.USE_CHECKPOINT)
+        elif model_type == 'darswin_unet':
+            self.swin_unet = DarSwin_Unet(img_size=config.DATA.IMG_SIZE,
+                                    radius_cuts=config.MODEL.SWIN.RADIUS_CUTS, 
+                                    azimuth_cuts=config.MODEL.SWIN.AZIMUTH_CUTS,
+                                    in_chans=config.MODEL.SWIN.IN_CHANS,
+                                    num_classes=config.MODEL.NUM_CLASSES,
+                                    embed_dim=config.MODEL.SWIN.EMBED_DIM,
+                                    depths=config.MODEL.SWIN.DEPTHS,
+                                    num_heads=config.MODEL.SWIN.NUM_HEADS,
+                                    window_size=config.MODEL.SWIN.WINDOW_SIZE_GRID,
+                                    mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
+                                    qkv_bias=config.MODEL.SWIN.QKV_BIAS,
+                                    qk_scale=config.MODEL.SWIN.QK_SCALE,
+                                    drop_rate=config.MODEL.DROP_RATE,
+                                    drop_path_rate=config.MODEL.DROP_PATH_RATE,
+                                    ape=config.MODEL.SWIN.APE,
+                                    patch_norm=config.MODEL.SWIN.PATCH_NORM,
+                                    use_checkpoint=config.TRAIN.USE_CHECKPOINT,
+                                    distortion_model = config.MODEL.DISTORTION, 
+                                    n_radius = config.MODEL.NRADIUS, 
+                                    n_azimuth = config.MODEL.NAZIMUTH) 
         else:
             raise NotImplementedError(f"Unkown model: {model_type}")
 

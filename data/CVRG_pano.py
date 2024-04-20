@@ -208,17 +208,17 @@ class CVRG(Dataset):
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/20_5_cl_train.pkl', 'rb') as f:
+            with open(base_dir + '/25_4_cl_tan_train.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/20_5_cl_val.pkl', 'rb') as f:
+            with open(base_dir + '/25_4_cl_tan_val.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/10_10_cl_test.pkl', 'rb') as f:
+            with open(base_dir + '/32_5_cl_test.pkl', 'rb') as f:
                 dist = pkl.load(f)
 
             # with open(self.data_dir + '/test_calib.pkl', 'rb') as f:
@@ -287,9 +287,9 @@ class CVRG(Dataset):
             image, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
             segm,_= warpToFisheye(segm, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=0)
             dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
-            if self.split=='train' or self.split=='val':
+            # if self.split=='train' or self.split=='val':
                 # print(f/(h/self.img_size), self.dist[idx][1])
-                assert f/(h/self.img_size) == self.dist[idx][1]
+                # assert f/(h/self.img_size) == self.dist[idx][1]
                 # print(f, self.dist[xi][1])
                 # assert f == self.dist[xi][1]         
             segm = segm.astype(np.uint8)

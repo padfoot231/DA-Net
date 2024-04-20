@@ -319,16 +319,16 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if (idx) % 100==0:
-            image= images[0,...].permute(1,2,0)
-            image*= torch.tensor(std).cuda()
-            image+= torch.tensor(mean).cuda()
-            plt.imsave(config.OUTPUT+ '/' + '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
-            # + str(config.DATA.XI) + '/' +  
-            label = target[0].detach().cpu().numpy()
-            plt.imsave(config.OUTPUT+ '/val_label_{}.png'.format(idx), label.astype(np.uint8))
-            pred= output.argmax(1)[0].cpu().detach().numpy()
-            plt.imsave(config.OUTPUT+ '/val_pred_{}.png'.format(idx), pred)
+        # if (idx) % 1==0:
+        #     image= images[0,...].permute(1,2,0)
+        #     image*= torch.tensor(std).cuda()
+        #     image+= torch.tensor(mean).cuda()
+        #     plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
+        #     # + str(config.DATA.XI) + '/' +  
+        #     label = target[0].detach().cpu().numpy()
+        #     plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_label_{}.png'.format(idx), label.astype(np.uint8))
+        #     pred= output.argmax(1)[0].cpu().detach().numpy()
+        #     plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_pred_{}.png'.format(idx), pred)
 
         if idx % config.PRINT_FREQ == 0:
             memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
@@ -396,7 +396,6 @@ if __name__ == '__main__':
     np.random.seed(seed)
     random.seed(seed)
     cudnn.benchmark = True
-
     # linear scale the learning rate according to total batch size, may not be optimal
     # if args.batch_size != 24 and args.batch_size % 6 == 0:
     # linear_scaled_lr = config.TRAIN.BASE_LR * config.DATA.BATCH_SIZE * dist.get_world_size() / 512.0 ## change it based on the scheduler performance

@@ -948,7 +948,7 @@ class swin_transformer_angular_denoiser_unet(nn.Module):
             print("---final upsample expand_first---")
             self.up = FinalPatchExpand_X4(input_resolution=(patches_resolution[0], patches_resolution[1]),input_dim=embed_dim,dim=embed_dim, n_radius=n_radius, n_azimuth=n_azimuth)
             # self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
-            self.output = UDnCNN(D = 4, C = embed_dim)
+            self.output = UDnCNN(D = 2, C = embed_dim)
             self.final = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
 
 

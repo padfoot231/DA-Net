@@ -12,7 +12,7 @@ import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils import get_sample_params_from_subdiv
+from utils_tan import get_sample_params_from_subdiv
 pi = 3.141592653589793
 
 
@@ -975,8 +975,8 @@ if __name__=='__main__':
     pil = transforms.ToPILImage()
 
     model = SwinTransformerAng(img_size=128,
-                        radius_cuts=32, 
-                        azimuth_cuts=128,
+                        radius_cuts=64, 
+                        azimuth_cuts=64,
                         in_chans=3,
                         num_classes=200,
                         embed_dim=96,
@@ -992,8 +992,8 @@ if __name__=='__main__':
                         ape=False,
                         patch_norm=True,
                         use_checkpoint=False,
-                        n_radius = 20,
-                        n_azimuth = 5)
+                        n_radius = 15,
+                        n_azimuth = 7)
     model = model.cuda()
     
 
@@ -1009,8 +1009,8 @@ if __name__=='__main__':
     # dist = data[1]
     # dist = torch.tensor(dist).reshape(1, 3).cuda()
     # breakpoint()
-    dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/20_5_cl_train.pkl', 'rb') as f:
+    # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
+    with open('/home/prongs/scratch/25_4_cl_tan_train.pkl', 'rb') as f:
         data = pkl.load(f)
     xi = data[0][2]
     f = data[0][1]

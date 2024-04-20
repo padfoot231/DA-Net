@@ -8,6 +8,6 @@ python -m torch.distributed.launch \
 --cfg configs/swin/CVRG_swin.yaml \
 --output /home/prongs/scratch/Radial-unet \
 --data-path  $SLURM_TMPDIR/data/CVRG-Pano \
---fov 170.0 \
+--fov 175.0 \
 --xi 0.0 \
 --batch-size 8

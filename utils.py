@@ -191,6 +191,7 @@ def save_checkpoint(config, epoch, model, max_miou, miou, optimizer, lr_schedule
 
     # breakpoint()
     if miou > max_miou :
+        print(epoch)
         save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_best.pth')
         logger.info(f"{save_path} saving......")
         torch.save(save_state, save_path)
@@ -505,6 +506,7 @@ def get_inverse_distortion(num_points, D, mag=1.0):
         theta_d = theta_d - err
         theta_d[0] = 0.0
     # r_list = dist_func(torch.arctan(theta_d))
+
     r_list = dist_func(theta_d)
     # return r_list, torch.tan(torch.tensor(fov))
     return r_list, fov
@@ -524,15 +526,23 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
     # rad_1 = lambda x: new_f/8*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
     theta_d_max = fov/2
+    # print("ass")
     # theta_d_max = torch.tan(fov/2)
     theta_d = linspace(torch.tensor([0]).cuda(), theta_d_max, num_points+1).cuda()
-    # tan_theta_d = torch.tan(theta_d)
-    # t1 = inverse_rad(2.0)     
-    # t2 = inverse_rad(4.0)
-    # theta_d_num = linspace(torch.tensor([0]).cuda(), theta_d_max, (num_points+1)*8).cuda()
-    # theta_d_num1 = linspace(t1, t2, 10).cuda()
-    # r_list = rad(tan_theta_d)   
+    delta = float(torch.diff(theta_d, axis=0)[0][0])
+    a = np.random.uniform(0, 1)
+    err = np.random.uniform(0, delta/2)
+    if  a > 0.5:
+        err = np.random.uniform(0, delta/2)
+        theta_d = theta_d + err
+        # theta_d[-1] = torch.tan(torch.tensor(fov))
+        theta_d[-1] = torch.tensor(fov/2)
+    elif a < 0.5 or a == 0.5:
+    # elif a < 0.5:
+        theta_d = theta_d - err
+        theta_d[0] = 0.0
     r_list = rad(theta_d)
+    # print("theta")
     # r_lin = rad(theta_d_num)
     # r_d = rad(theta_d_num1)
     return r_list, theta_d_max

@@ -1,6 +1,6 @@
 MODEL:
   TYPE: swin_ang_den_unet
-  NAME: woodscape_den_unet_20_5_more
+  NAME: CVRG_20_5
   DROP_PATH_RATE: 0.2
   DISTORTION: spherical
   NRADIUS: 20

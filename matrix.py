@@ -15,7 +15,7 @@ dtype = torch.float32 if use_cuda else torch.float64
 device_id = "cuda:0" if use_cuda else "cpu"
 # from utils import get_sample_params_from_subdiv, get_sample_locations
 import numpy as np
-from utils import get_sample_params_from_subdiv
+from utils_tan import get_sample_params_from_subdiv
 from torchvision.transforms import transforms
 t2pil = transforms.ToTensor()
 pil = transforms.ToPILImage()
@@ -131,10 +131,7 @@ def resample(grid, grid_pix, H, B):
 #     pixel_out = pixel_out.transpose(2, 1).reshape(B, 3, H, H)
     return cl
 
-with open('/home-local2/akath.extra.nobkp/woodscape/calib.pkl', 'rb') as f:
-    data = pkl.load(f)
-
-key = list(data.keys())
+# key = list(data.keys())
 
 H, W = 128, 128
 x = torch.linspace(0, H, H+1) - H//2 + 0.5
@@ -144,28 +141,33 @@ x_ = grid_x.reshape(H*W, 1)
 y_ = grid_y.reshape(H*W, 1)
 grid_pix = torch.cat((x_, y_), dim=1).type(torch.float32)
 grid_pix = grid_pix.reshape(1, H*W, 2).cuda("cuda:0")
-dist = {}
-image = Image.open('/home-local2/akath.extra.nobkp/CVRG-Pano/all-rgb/img-260.png')
+image = Image.open('/localscratch/prongs.46754485.0/data/CVRG-Pano/all-rgb/img-260.png')
 image = np.array(image)
-with open('/home-local2/akath.extra.nobkp/CVRG-Pano/val.pkl', 'rb') as f:
+with open('/localscratch/prongs.46754485.0/data/CVRG-Pano/val.pkl', 'rb') as f:
     data = pkl.load(f)
-h= 128
-fov= 170
+h= 512
+fov= 175
+D_xi = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+dist = {}
 dist = []
+
 for i in range(len(data)):
+# for i in range(10):
     # print(key[i])
     xi = np.random.uniform(0.83, 0.9)
+    # xi = D_xi[i]
     im, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(0), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
     # D = torch.tensor(data[key[i]].reshape(1,4).transpose(1,0)).cuda("cuda:0")
     # D = np.array([1.0, 0.0, 0.0, 0.0])
     # D = torch.tensor(D.reshape(1,4).transpose(1,0)).cuda("cuda:0")
-    D = torch.tensor([ xi, f,  2.9671]).reshape(1, 3).transpose(0,1).cuda()
+    D = torch.tensor([ xi, f/(h/128),  2.9671]).reshape(1, 3).transpose(0,1).cuda()
     azimuth_subdiv = H
     radius_subdiv = W//4
-    n_radius = 10
-    n_azimuth = 10
+    n_radius = 28
+    n_azimuth = 4
     subdiv = (radius_subdiv*n_radius, azimuth_subdiv*n_azimuth)
     # subdiv = 3
+    # breakpoint()
 
     img_size = (H, W)
     radius_buffer, azimuth_buffer = 0, 0
@@ -194,12 +196,14 @@ for i in range(len(data)):
     # cl = np.array(cl.cpu())
     cl = cl[0].cpu()    
     # breakpoint()
-    # breakpoint()
-    dist.append([cl, f, xi])
+    # breakpoint()/
+    dist.append([cl, f/(h/128), xi])
+    # dist[xi] = [cl, f, xi]
     # np.save('/home-local2/akath.extra.nobkp/woodscape/matrix_8/8_8_' + str(key[i]) + '.pkl', cl)
     print(i)
 
-with open('/home-local2/akath.extra.nobkp/CVRG-Pano/10_10_cl_val.pkl', 'wb') as f:
+# breakpoint()
+with open('/home/prongs/scratch/32_5_cl_tan_val.pkl', 'wb') as f:
     data = pkl.dump(dist, f)
 
 
