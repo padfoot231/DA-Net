@@ -197,6 +197,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         ###############
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
+	
         # dist = dist.cuda(non_blocking=True)   
         cls = cls.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
@@ -233,8 +234,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         scaler_meter.update(loss_scale_value)
         batch_time.update(time.time() - end)
         end = time.time()
-        if (idx) % 50 ==0:
-            # breakpoint()
+        if (idx) % 100 == 0:
             # image= images[0,...].permute(1,2,0)
             # image*= torch.tensor(std).cuda(cuda_id)
             # image+= torch.tensor(mean).cuda(cuda_id)
@@ -243,7 +243,6 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
             plt.imsave(config.OUTPUT+ '/train_label_{}.png'.format(idx), label.astype(np.uint8))
             pred= outputs.argmax(1)[0].cpu().detach().numpy()
             plt.imsave(config.OUTPUT+ '/train_pred_{}.png'.format(idx), pred)
-
         # wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val })
 
         if idx % config.PRINT_FREQ == 0:

@@ -792,8 +792,6 @@ class PatchEmbed(nn.Module):
             img_size=self.img_size,
             distortion_model = self.distoriton_model,
             D = dist, 
-            n_radius=self.n_radius,
-            n_azimuth=self.n_azimuth,
             radius_buffer=radius_buffer,
             azimuth_buffer=azimuth_buffer)
         # sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
@@ -1013,7 +1011,6 @@ class swin_transformer_angular_denoiser_unet(nn.Module):
         x = self.up_x4(x)
         x = restruct(x, cls, self.embed_dim, self.img_size, self.img_size)
         # breakpoint()
-        # print("ass")
         x = self.output(x)
         x = self.final(x)
         return x

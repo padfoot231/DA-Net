@@ -1,0 +1,19 @@
+MODEL:
+  TYPE: swin_ang_den_unet
+  NAME: CVRG_25_4
+  DROP_PATH_RATE: 0.2
+  DISTORTION: spherical
+  NRADIUS: 25
+  NAZIMUTH: 4
+  SWIN:
+    EMBED_DIM: 96
+    FINAL_UPSAMPLE: "expand_first"
+    DEPTHS: [ 2, 2, 18, 2 ]
+    NUM_HEADS: [ 3, 6, 12, 24 ]
+    WINDOW_SIZE: (1,16)
+DATA:
+  HIGH: 0.8
+  LOW: 0.93
+  FOV: 175
+  DATASET: CVRG
+  
