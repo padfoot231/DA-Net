@@ -195,9 +195,9 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
     for idx, (samples, targets, dist, cls, mask, one_hot) in enumerate(data_loader):
 
         ###############
+        # breakpoint()
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
-	
         # dist = dist.cuda(non_blocking=True)   
         cls = cls.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)

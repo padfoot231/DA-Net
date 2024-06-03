@@ -510,11 +510,12 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # xi = 0
     p = 1
     rad = lambda x: ((xi + torch.cos(torch.arctan(torch.tan(torch.tensor(fov/2)))))/torch.sin(torch.arctan(torch.tan(torch.tensor(fov/2)))))*torch.sin(torch.arctan(p*x))/(xi + torch.cos(torch.arctan(p*x))) 
-    # rad = lambda x: new_f*torch.sin(x)/(xi + torch.cos(x)) 
+    # rad = lambda x: ((xi + torch.cos(torch.arctan(torch.tan(torch.tensor(fov/2)))))/torch.sin(torch.arctan(torch.tan(torch.tensor(fov/2)))))*torch.sin(x)/(xi + torch.cos(x)) 
     # rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
     # rad_1 = lambda x: new_f/8*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
-    theta_d_max = (torch.tan(torch.tensor(fov/2))).cuda()
-    # theta_d_max = torch.tan(fov/2)
+    # theta_d_max = (torch.tan(torch.tensor(fov/2))).cuda()
+    theta_d_max = torch.tan(fov/2)
+    # theta_d_max = torch.tensor(fov/2)
     theta_d = linspace(torch.tensor([0]).cuda(), theta_d_max, num_points+1)
     delta = float(torch.diff(theta_d, axis=0)[0][0])
     a = np.random.uniform(0, 1)
@@ -566,7 +567,7 @@ def get_inverse_dist_spherical_tan(num_points, xi, fov, new_f):
     # print("unet this is it ").
     return r_list, theta_d_max
 
-def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda(), radius_buffer=0, azimuth_buffer=0):
+def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
     """Generate the required parameters to sample every patch based on the subdivison
     Args:
         subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
@@ -586,6 +587,7 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
         xi = D[0]
         D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
         D_min = D_min*max_radius
+        import pdb;pdb.set_trace()
         # breakpoint()
     elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
         # 
@@ -604,6 +606,145 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
     x = D_min * phi_list_cos    # takes time the cosine and multiplication function 
     y = D_min * phi_list_sine
     return x.transpose(1, 2).transpose(0,1), y.transpose(1, 2).transpose(0,1), theta_max
+
+
+def concentric_dic_sampling(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
+    """Generate the required parameters to sample every patch based on the subdivison
+    Args:
+        subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
+                                  samples. The format is (radius_subdiv, azimuth_subdiv)
+        n_radius (int): number of radius samples
+        n_azimuth (int): number of azimuth samples
+        img_size (tuple): the size of the image
+    Returns:
+        list[dict]: the list of parameters to sample every patch
+    """
+    max_radius = min(img_size)/2
+    width = subdiv[0]*2
+    # D_min = get_inverse_distortion(subdiv[0], D, max_radius)
+    if distortion_model == 'spherical': # in case of spherical distortion pass the 
+        fov = D[2][0]
+        f  = D[1]
+        xi = D[0]
+        D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
+        D_min = D_min*max_radius
+    r_1 = torch.cat((-torch.flip(D_min[1:, :], (0,1)), D_min[1:, :])).transpose(0, 1)
+    A_ = r_1.reshape(D.shape[1], width, 1).repeat_interleave(width, 2)
+    B_ = r_1.reshape(D.shape[1], 1, width).repeat_interleave(width, 1)
+    R1 = torch.linspace(0.0, 1, width).cuda()
+    R2 = torch.linspace(0.0, 1, width).cuda()
+    a = 2*R1 - 1
+    b = 2*R2 - 1
+
+    radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32).cuda()
+    phi = torch.zeros((width, width), dtype=torch.float32).cuda()
+
+    # Create meshgrid for a and b
+    A, B = torch.meshgrid(a, b)
+    # Vectorized conditions
+    condition1 = (A == 0) & (B == 0)
+    condition2 = A * A > B * B
+    condition3 = ~condition1 & ~condition2
+    # Calculate radius and phi for condition1
+    
+    radius[:, condition2] = 0
+    phi[condition1] = 0
+
+    # Calculate radius and phi for condition2
+    # for i in range(2):
+    radius[:, condition2] = A_[:, condition2]
+    phi[condition2] = (np.pi / 4) * (B[condition2] / A[condition2])
+
+    # Calculate radius and phi for condition3 (the remaining cases)
+    radius[:, condition3] = B_[:, condition3]
+    phi[condition3] = np.pi / 2 - (np.pi / 4) * (A[condition3] / B[condition3])
+    # phi = phi.reshape(1, H, H).repeat_interleave(2, 0)
+
+    # alpha = 2*torch.tensor(np.pi).cuda() / subdiv[1]
+    # D_min = D_min[1:].reshape(subdiv[0], 1, D.shape[1]).repeat_interleave(subdiv[1], 1).cuda()
+    # phi_start = 0
+    # phi_end = 2*torch.tensor(np.pi)
+    # phi_step = alpha
+    # phi_list = torch.arange(phi_start, phi_end, phi_step)
+    # phi_list = phi_list.reshape(1, subdiv[1]).repeat_interleave(subdiv[0], 0).reshape(subdiv[0], subdiv[1], 1).repeat_interleave(D.shape[1], 2).cuda()
+    # # phi = p.transpose(1,0).flatten().cuda()
+    # phi_list_cos  = torch.cos(phi_list) 
+    # phi_list_sine = torch.sin(phi_list) 
+    # x = D_min * phi_list_cos    # takes time the cosine and multiplication function 
+    # y = D_min * phi_list_sine
+    x = radius*torch.cos(phi)
+    y = radius*torch.sin(phi)
+    return x, y, theta_max
+
+
+def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
+    """Generate the required parameters to sample every patch based on the subdivison
+    Args:
+        subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
+                                  samples. The format is (radius_subdiv, azimuth_subdiv)
+        n_radius (int): number of radius samples
+        n_azimuth (int): number of azimuth samples
+        img_size (tuple): the size of the image
+    Returns:
+        list[dict]: the list of parameters to sample every patch
+    """
+    max_radius = min(img_size)/2
+    width = subdiv[0]*2 + 1
+    # D_min = get_inverse_distortion(subdiv[0], D, max_radius)
+    if distortion_model == 'spherical': # in case of spherical distortion pass the 
+        fov = D[2][0]
+        f  = D[1]
+        xi = D[0]
+        D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
+        D_min = D_min*max_radius
+    breakpoint()
+    r_1 = torch.cat((-torch.flip(D_min, (0,1))[:-1], D_min)).transpose(0, 1)
+    A_ = r_1.reshape(D.shape[1], width, 1).repeat_interleave(width, 2)
+    B_ = r_1.reshape(D.shape[1], 1, width).repeat_interleave(width, 1)
+    R1 = torch.linspace(0.0, 1, width).cuda()
+    R2 = torch.linspace(0.0, 1, width).cuda()
+    a = 2*R1 - 1
+    b = 2*R2 - 1
+    radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32).cuda()
+    phi = torch.zeros((width, width), dtype=torch.float32).cuda()
+
+    # Create meshgrid for a and b
+    A, B = torch.meshgrid(a, b)
+    # Vectorized conditions
+    condition1 = (A == 0) & (B == 0)
+    condition2 = A * A > B * B
+    condition3 = ~condition1 & ~condition2
+    # Calculate radius and phi for condition1
+    
+    radius[:, condition2] = 0
+    phi[condition1] = 0
+
+    # Calculate radius and phi for condition2
+    # for i in range(2):
+    radius[:, condition2] = A_[:, condition2]
+    phi[condition2] = (np.pi / 4) * (B[condition2] / A[condition2])
+
+    # Calculate radius and phi for condition3 (the remaining cases)
+    radius[:, condition3] = B_[:, condition3]
+    phi[condition3] = np.pi / 2 - (np.pi / 4) * (A[condition3] / B[condition3])
+
+    # phi = phi.reshape(1, H, H).repeat_interleave(2, 0)
+
+    # alpha = 2*torch.tensor(np.pi).cuda() / subdiv[1]
+    # D_min = D_min[1:].reshape(subdiv[0], 1, D.shape[1]).repeat_interleave(subdiv[1], 1).cuda()
+    # phi_start = 0
+    # phi_end = 2*torch.tensor(np.pi)
+    # phi_step = alpha
+    # phi_list = torch.arange(phi_start, phi_end, phi_step)
+    # phi_list = phi_list.reshape(1, subdiv[1]).repeat_interleave(subdiv[0], 0).reshape(subdiv[0], subdiv[1], 1).repeat_interleave(D.shape[1], 2).cuda()
+    # # phi = p.transpose(1,0).flatten().cuda()
+    # phi_list_cos  = torch.cos(phi_list) 
+    # phi_list_sine = torch.sin(phi_list) 
+    # x = D_min * phi_list_cos    # takes time the cosine and multiplication function 
+    # y = D_min * phi_list_sine
+    x = radius*torch.cos(phi)
+    y = radius*torch.sin(phi)
+    return x, y, theta_max
 
 
 

@@ -14,7 +14,7 @@ import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils_tan import get_sample_params_from_subdiv
+from utils_curve import get_sample_params_from_subdiv
 pi = 3.141592653589793
 
 def sph2cart(az, el, r):
@@ -802,8 +802,8 @@ class PatchEmbed(nn.Module):
             img_size=self.img_size,
             distortion_model = self.distoriton_model,
             D = dist, 
-            n_radius=self.n_radius,
-            n_azimuth=self.n_azimuth,
+            # n_radius=self.n_radius,
+            # n_azimuth=self.n_azimuth,
             radius_buffer=radius_buffer,
             azimuth_buffer=azimuth_buffer)
         # sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
@@ -1087,7 +1087,7 @@ if __name__=='__main__':
     # dist = torch.tensor(dist).reshape(1, 3).cuda()
     # breakpoint()
     # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/25_4_cl_tan_train.pkl', 'rb') as f:
+    with open('/home/prongs/scratch/25_4_cl_curve_train.pkl', 'rb') as f:
         data = pkl.load(f)
     # with open('/home/prongs/scratch/0.9.pkl', 'rb') as f:
     #     data = pkl.load(f)

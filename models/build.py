@@ -24,7 +24,7 @@ from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNo
 from torch.nn.modules.utils import _pair
 from scipy import ndimage
 from .swin_transformer_angular_denoiser_unet import swin_transformer_angular_denoiser_unet
-from .swin_unet import SwinTransformerSys
+from .swin_unet_disc import SwinTransformerSys
 from .swin_transformer_angular_denoiser_theta import swin_transformer_angular_denoiser_theta
 from .darswin_swin_unet import DarSwin_unet
 

@@ -208,17 +208,17 @@ class CVRG(Dataset):
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/25_4_cl_tan_train.pkl', 'rb') as f:
+            with open(base_dir + '/25_4_cl_new_curve_train.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/25_4_cl_tan_val.pkl', 'rb') as f:
+            with open(base_dir + '/25_4_cl_new_curve_val.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/32_5_cl_test.pkl', 'rb') as f:
+            with open(base_dir + '/25_4_cl_curve_test.pkl', 'rb') as f:
                 dist = pkl.load(f)
 
             # with open(self.data_dir + '/test_calib.pkl', 'rb') as f:
@@ -249,6 +249,7 @@ class CVRG(Dataset):
                 img_path = self.data_dir + '/train/rgb/' + self.data[idx]
                 sem_path = self.data_dir + '/train/mask/' + self.data[idx]
                 i = random.randint(0, len(self.dist) - 1)
+                # print(self.dist)
                 cls = self.dist[i][0]
             elif self.split == 'test':
                 img_path = self.data_dir + '/test/rgb/' + self.data[idx]

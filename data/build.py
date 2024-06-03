@@ -21,6 +21,7 @@ from .samplers import SubsetRandomSampler
 from .Distorted_imagenet import M_distort
 from .Woodsc import Woodscape_dataset, RandomGenerator
 from .cityscapes import Cityscape_dataset
+# from .stanford2d3d import CVRG
 from .CVRG_pano import CVRG
 
 try:
