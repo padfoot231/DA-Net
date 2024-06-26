@@ -24,6 +24,51 @@ import torch
 
 transform = T.ToPILImage()
 
+
+class Evaluator(object):
+    def __init__(self, num_class):
+        self.num_class = num_class
+        self.confusion_matrix = np.zeros((self.num_class,)*2)
+
+    def Pixel_Accuracy(self):
+        Acc = np.diag(self.confusion_matrix).sum() / self.confusion_matrix.sum()
+        return Acc
+
+    def Pixel_Accuracy_Class(self):
+        Acc = np.diag(self.confusion_matrix) / self.confusion_matrix.sum(axis=1)
+        Acc = np.nanmean(Acc)
+        return Acc
+
+    def Mean_Intersection_over_Union(self):
+        MIoU = np.diag(self.confusion_matrix) / (
+                    np.sum(self.confusion_matrix, axis=1) + np.sum(self.confusion_matrix, axis=0) -
+                    np.diag(self.confusion_matrix))
+        MIoU = np.nanmean(MIoU)
+        return MIoU
+
+    def Frequency_Weighted_Intersection_over_Union(self):
+        freq = np.sum(self.confusion_matrix, axis=1) / np.sum(self.confusion_matrix)
+        iu = np.diag(self.confusion_matrix) / (
+                    np.sum(self.confusion_matrix, axis=1) + np.sum(self.confusion_matrix, axis=0) -
+                    np.diag(self.confusion_matrix))
+
+        FWIoU = (freq[freq > 0] * iu[freq > 0]).sum()
+        return FWIoU
+
+    def _generate_matrix(self, gt_image, pre_image):
+        mask = (gt_image >= 0) & (gt_image < self.num_class)
+        label = self.num_class * gt_image[mask].astype('int') + pre_image[mask]
+        count = np.bincount(label, minlength=self.num_class**2)
+        confusion_matrix = count.reshape(self.num_class, self.num_class)
+        return confusion_matrix
+
+    def add_batch(self, gt_image, pre_image):
+        assert gt_image.shape == pre_image.shape
+        self.confusion_matrix += self._generate_matrix(gt_image, pre_image)
+
+    def reset(self):
+        self.confusion_matrix = np.zeros((self.num_class,) * 2)
+
 class DiceLoss(nn.Module):
     def __init__(self, n_classes):
         super(DiceLoss, self).__init__()
@@ -577,18 +622,19 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # theta_d_max = torch.tan(fov/2)
     # theta_d = linspace(torch.tensor([0]).cuda(), g(theta_d_max), num_points+1).cuda()
     theta_d = torch.linspace(0, g(theta_d_max, m = m, n = n, a = a, b = b, c = c), num_points + 1).cuda()
-    # delta = float(torch.diff(theta_d, axis=0)[0])
-    # a = np.random.uniform(0, 1)
-    # err = np.random.uniform(0, delta/2)
-    # if  a > 0.5:
-    #     err = np.random.uniform(0, delta/2)
-    #     theta_d = theta_d + err
-    #     # theta_d[-1] = torch.tan(torch.tensor(fov))
-    #     theta_d[-1] = g(theta_d_max, m = m, n = n, a = a, b = b, c = c)
-    # elif a < 0.5 or a == 0.5:
-    # # elif a < 0.5:
-    #     theta_d = theta_d - err
-    #     theta_d[0] = 0.0
+
+    delta = float(torch.diff(theta_d, axis=0)[0])
+    thresh = np.random.uniform(0, 1)
+    err = np.random.uniform(0, delta/2)
+    if  thresh > 0.5:
+        err = np.random.uniform(0, delta/2)
+        theta_d = theta_d + err
+        # theta_d[-1] = torch.tan(torch.tensor(fov))
+        theta_d[-1] = g(theta_d_max, m = m, n = n, a = a, b = b, c = c)
+    elif thresh < 0.5 or thresh == 0.5:
+    # elif a < 0.5:
+        theta_d = theta_d - err
+        theta_d[0] = 0.0
     # r_list = rad(theta_d)
     r_list = rad(xi, theta_d, theta_d_max)
     # print("theta")

@@ -515,6 +515,7 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # rad_1 = lambda x: new_f/8*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
     # theta_d_max = (torch.tan(torch.tensor(fov/2))).cuda()
     theta_d_max = torch.tan(fov/2)
+    # breakpoint()
     # theta_d_max = torch.tensor(fov/2)
     theta_d = linspace(torch.tensor([0]).cuda(), theta_d_max, num_points+1)
     delta = float(torch.diff(theta_d, axis=0)[0][0])
@@ -537,12 +538,13 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # theta_d_num = linspace(torch.tensor([0]).cuda(), theta_d_max, (num_points+1)*8).cuda()
     # theta_d_num1 = linspace(t1, t2, 10).cuda()
     # r_list = rad(tan_theta_d)   
+    # breakpoint()
     r_list = rad(theta_d)
     # r_lin = rad(theta_d_num)
     # r_d = rad(theta_d_num1)
     # print("ass")
     # breakpoint()
-    return r_list , theta_d_max
+    return r_list, theta_d_max
 def get_inverse_dist_spherical_tan(num_points, xi, fov, new_f):
     # 
     # xi = torch.tensor(xi).cuda()
@@ -586,8 +588,9 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
         f  = D[1]
         xi = D[0]
         D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
+        # breakpoint()
         D_min = D_min*max_radius
-        import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
         # breakpoint()
     elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
         # 
@@ -627,18 +630,19 @@ def concentric_dic_sampling(subdiv, distortion_model, img_size, D=torch.tensor(n
         f  = D[1]
         xi = D[0]
         D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
+        # breakpoint()
         D_min = D_min*max_radius
+  
     r_1 = torch.cat((-torch.flip(D_min[1:, :], (0,1)), D_min[1:, :])).transpose(0, 1)
     A_ = r_1.reshape(D.shape[1], width, 1).repeat_interleave(width, 2)
     B_ = r_1.reshape(D.shape[1], 1, width).repeat_interleave(width, 1)
+
     R1 = torch.linspace(0.0, 1, width).cuda()
     R2 = torch.linspace(0.0, 1, width).cuda()
     a = 2*R1 - 1
     b = 2*R2 - 1
-
     radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32).cuda()
     phi = torch.zeros((width, width), dtype=torch.float32).cuda()
-
     # Create meshgrid for a and b
     A, B = torch.meshgrid(a, b)
     # Vectorized conditions
@@ -658,6 +662,7 @@ def concentric_dic_sampling(subdiv, distortion_model, img_size, D=torch.tensor(n
     # Calculate radius and phi for condition3 (the remaining cases)
     radius[:, condition3] = B_[:, condition3]
     phi[condition3] = np.pi / 2 - (np.pi / 4) * (A[condition3] / B[condition3])
+
     # phi = phi.reshape(1, H, H).repeat_interleave(2, 0)
 
     # alpha = 2*torch.tensor(np.pi).cuda() / subdiv[1]
@@ -672,6 +677,7 @@ def concentric_dic_sampling(subdiv, distortion_model, img_size, D=torch.tensor(n
     # phi_list_sine = torch.sin(phi_list) 
     # x = D_min * phi_list_cos    # takes time the cosine and multiplication function 
     # y = D_min * phi_list_sine
+    import pdb;pdb.set_trace()
     x = radius*torch.cos(phi)
     y = radius*torch.sin(phi)
     return x, y, theta_max
@@ -696,8 +702,8 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
         f  = D[1]
         xi = D[0]
         D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
+        # breakpoint()
         D_min = D_min*max_radius
-    breakpoint()
     r_1 = torch.cat((-torch.flip(D_min, (0,1))[:-1], D_min)).transpose(0, 1)
     A_ = r_1.reshape(D.shape[1], width, 1).repeat_interleave(width, 2)
     B_ = r_1.reshape(D.shape[1], 1, width).repeat_interleave(width, 1)
@@ -707,7 +713,7 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     b = 2*R2 - 1
     radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32).cuda()
     phi = torch.zeros((width, width), dtype=torch.float32).cuda()
-
+    # breakpoint()
     # Create meshgrid for a and b
     A, B = torch.meshgrid(a, b)
     # Vectorized conditions
@@ -715,7 +721,7 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     condition2 = A * A > B * B
     condition3 = ~condition1 & ~condition2
     # Calculate radius and phi for condition1
-    
+    # breakpoint()
     radius[:, condition2] = 0
     phi[condition1] = 0
 
@@ -729,6 +735,7 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     phi[condition3] = np.pi / 2 - (np.pi / 4) * (A[condition3] / B[condition3])
 
     # phi = phi.reshape(1, H, H).repeat_interleave(2, 0)
+    # breakpoint()
 
     # alpha = 2*torch.tensor(np.pi).cuda() / subdiv[1]
     # D_min = D_min[1:].reshape(subdiv[0], 1, D.shape[1]).repeat_interleave(subdiv[1], 1).cuda()

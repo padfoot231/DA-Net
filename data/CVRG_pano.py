@@ -204,28 +204,32 @@ class CVRG(Dataset):
         self.low = low
         self.xi = xi
         self.high = high
-        
+        # print(split)
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/25_4_cl_new_curve_train.pkl', 'rb') as f:
+            with open(base_dir + '/12NN-25_4_cl_new_curve_train.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/25_4_cl_new_curve_val.pkl', 'rb') as f:
+            with open(base_dir + '/12NN-25_4_cl_new_curve_val.pkl', 'rb') as f:
                 dist = pkl.load(f)
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
                 data = pkl.load(f)
-            with open(base_dir + '/25_4_cl_curve_test.pkl', 'rb') as f:
+            with open(base_dir + '/4NN-36_4_cl_new_curve_test.pkl', 'rb') as f:
                 dist = pkl.load(f)
-
+            with open(base_dir + '/deg.pkl', 'rb') as f:
+                deg = pkl.load(f)
+                self.deg = deg
+ 
             # with open(self.data_dir + '/test_calib.pkl', 'rb') as f:
             #     self.calib = pkl.load(f)
 
         self.data = data #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
         self.dist = dist
+
 
         # if self.calib is None and os.path.exists(self.data_dir+ '/calib_gp2.pkl') :
         #     with open(self.data_dir + '/calib_gp2.pkl', 'rb') as f:
@@ -238,22 +242,17 @@ class CVRG(Dataset):
 
     def __getitem__(self, idx):
         
-        b_path= self.data[idx]
-        if self.model =="polynomial":
-            img_path = self.data_dir + '/rgb_images/' + self.data[idx]
-            depth_path = self.data_dir + '/depth_maps/' + self.data[idx].replace('png','exr')
-            # max_depth=1000.0
-            dist= Distortion[(b_path.split('.')[0]).split('_')[1]]
-        elif self.model== "spherical":
-            if self.split == 'train' or self.split == 'val':
-                img_path = self.data_dir + '/train/rgb/' + self.data[idx]
-                sem_path = self.data_dir + '/train/mask/' + self.data[idx]
-                i = random.randint(0, len(self.dist) - 1)
-                # print(self.dist)
-                cls = self.dist[i][0]
-            elif self.split == 'test':
-                img_path = self.data_dir + '/test/rgb/' + self.data[idx]
-                sem_path = self.data_dir + '/test/mask/' + self.data[idx]
+        # elif self.model== "spherical":
+        if self.split == 'train' or self.split == 'val':
+            img_path = self.data_dir + '/train/rgb/' + self.data[idx]
+            sem_path = self.data_dir + '/train/mask/' + self.data[idx]
+            i = random.randint(0, len(self.dist) - 1)
+            # print(self.dist)
+            cls = self.dist[i][0]
+        elif self.split == 'test':
+            img_path = self.data_dir + '/test/rgb/' + self.data[idx]
+            sem_path = self.data_dir + '/test/mask/' + self.data[idx]
+                
                 
         # image= load_color(img_path)['color']
         image = Image.open(img_path)
@@ -280,24 +279,16 @@ class CVRG(Dataset):
                 # print(xi, fov, deg)
             elif self.split=='test':
                 xi= self.xi
-                deg = 0
-                # print("xi, deg")
+                deg = self.deg[idx]
+                # print(xi, deg)
                 cls = self.dist[xi][0]
 
             # print(xi, deg)
             image, f = warpToFisheye(image, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
             segm,_= warpToFisheye(segm, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=0)
-            dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
-            # if self.split=='train' or self.split=='val':
-                # print(f/(h/self.img_size), self.dist[idx][1])
-                # assert f/(h/self.img_size) == self.dist[idx][1]
-                # print(f, self.dist[xi][1])
-                # assert f == self.dist[xi][1]         
+            dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)  
             segm = segm.astype(np.uint8)
-            # print(xi, f, fov, h, deg)
-        #resizing to image_size
-        #image = resize(image,(self.img_size, self.img_size), order=1)
-        #label= resize(depth,(self.img_size, self.img_size), order=0)
+
         image = cv2.resize(image, (self.img_size,self.img_size),interpolation = cv2.INTER_LINEAR).astype(np.uint8)
         label= cv2.resize(segm, (self.img_size,self.img_size), interpolation = cv2.INTER_NEAREST)
         image = T(image)
@@ -363,6 +354,9 @@ if __name__ == "__main__":
     db[0]
     breakpoint()
     print("end")
+
+
+    breakpoint()
 
 #     mean tensor([0.9735, 1.2531, 1.3141])
 # std tensor([1.4566, 1.5787, 1.5510])

@@ -21,7 +21,7 @@ from .samplers import SubsetRandomSampler
 from .Distorted_imagenet import M_distort
 from .Woodsc import Woodscape_dataset, RandomGenerator
 from .cityscapes import Cityscape_dataset
-# from .stanford2d3d import CVRG
+from .stanford2d3d import Stanford
 from .CVRG_pano import CVRG
 
 try:
@@ -150,10 +150,17 @@ def build_dataset(is_train, config):
     elif config.DATA.DATASET == 'CVRG':
         if is_train:
             dataset = CVRG(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
-            nb_classes = 20
+            nb_classes =20
         else:
-            dataset = CVRG(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
-            nb_classes = 20
+            dataset = CVRG(config.DATA.DATA_PATH, split = 'test', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
+            nb_classes =20
+    elif config.DATA.DATASET == 'stanford':
+        if is_train:
+            dataset = Stanford(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
+            nb_classes =14
+        else:
+            dataset = Stanford(config.DATA.DATA_PATH, split = 'test', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
+            nb_classes =14
 
     else:
         raise NotImplementedError("We only support ImageNet Now.")

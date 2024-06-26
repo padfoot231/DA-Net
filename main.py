@@ -19,12 +19,12 @@ import torch
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torchvision.transforms as T
-from utils import DiceLoss
+from utils import DiceLoss, Evaluator
 from models.build import SwinUnet as ViT_seg
 from torch import optim as optim
 import torch.nn.functional as F
 from matplotlib import pyplot as plt 
-from torchmetrics.classification import MulticlassJaccardIndex
+from torchmetrics.classification import MulticlassJaccardIndex, MultilabelJaccardIndex
 
 
 
@@ -122,6 +122,7 @@ def main(config):
     num_classes = config.MODEL.NUM_CLASSES
     ce_loss = CrossEntropyLoss()
     dice_loss = DiceLoss(num_classes)
+    evaluator = Evaluator(config.MODEL.NUM_CLASSES)
 
     max_miou = 0.0
 
@@ -140,14 +141,14 @@ def main(config):
 
     if config.MODEL.RESUME:
         max_miou = load_checkpoint(config, model_without_ddp, optimizer, lr_scheduler, loss_scaler, logger)
-        miou, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
+        miou, loss = validate(config, ce_loss, dice_loss, evaluator, data_loader_val, model)
         logger.info(f"Mean iou of the network on the {len(dataset_val)} test images: {miou:.4f}")
         if config.EVAL_MODE:
             return
 
     if config.MODEL.PRETRAINED and (not config.MODEL.RESUME):
         load_pretrained(config, model_without_ddp, logger)
-        miou, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
+        miou, loss = validate(config, ce_loss, dice_loss, evaluator, data_loader_val, model)
         logger.info(f"Accuracy of the network on the {len(dataset_val)} test images: {miou:.4f}")
 
     if config.THROUGHPUT_MODE:
@@ -159,10 +160,10 @@ def main(config):
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.EPOCHS):
         data_loader_train.sampler.set_epoch(epoch)
 
-        train_one_epoch(config, model, ce_loss, dice_loss, data_loader_train, optimizer, epoch, mixup_fn,lr_scheduler,
+        train_one_epoch(config, model, ce_loss, dice_loss, evaluator, data_loader_train, optimizer, epoch, mixup_fn,lr_scheduler,
                         loss_scaler)
 
-        miou, loss = validate(config, ce_loss, dice_loss, data_loader_val, model)
+        miou, loss = validate(config, ce_loss, dice_loss, evaluator, data_loader_val, model)
         
         if dist.get_rank() == 0 and (epoch % config.SAVE_FREQ == 0 or epoch == (config.TRAIN.EPOCHS - 1)):
             save_checkpoint(config, epoch, model_without_ddp, max_miou, miou, optimizer, lr_scheduler, loss_scaler,
@@ -177,7 +178,7 @@ def main(config):
     logger.info('Training time {}'.format(total_time_str))
 
 
-def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, loss_scaler):
+def train_one_epoch(config, model, ce_loss, dice_loss, evaluator, data_loader, optimizer, epoch, mixup_fn, lr_scheduler, loss_scaler):
     model.train()
     optimizer.zero_grad()
     num_steps = len(data_loader)
@@ -204,6 +205,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         one_hot = one_hot.cuda(non_blocking=True)
         outputs = model(samples, dist, cls)
         B, _, _, _ = samples.shape
+        # breakpoint()
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
         outputs[:, :, mask[0, 0] == 0] = one_hot[:, :, mask[0, 0] == 0]
         
@@ -212,8 +214,12 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         loss_dice = dice_loss(outputs, targets, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
         loss = loss / config.TRAIN.ACCUMULATION_STEPS
-        pred = outputs.argmax(1)
-        miou = metric(pred, targets)
+
+        tar = targets.cpu().numpy()
+        pred = outputs.argmax(1).cpu().numpy()
+        # pred = output.data.cpu().numpy()
+        evaluator.add_batch(tar, pred)
+        # breakpoint()
         # this attribute is added by timm on one optimizer (adahessian)
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         grad_norm = loss_scaler(loss, optimizer, clip_grad=config.TRAIN.CLIP_GRAD,
@@ -228,7 +234,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
         torch.cuda.synchronize()
 
         loss_meter.update(loss.item(), targets.size(0))
-        miou_meter.update(miou.item(), targets.size(0))
+        # miou_meter.update(miou.item(), targets.size(0))
         if grad_norm is not None:  # loss_scaler return None if not update
             norm_meter.update(grad_norm)
         scaler_meter.update(loss_scale_value)
@@ -255,7 +261,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
                 f'eta {datetime.timedelta(seconds=int(etas))} lr {lr:.6f}\t wd {wd:.4f}\t'
                 f'time {batch_time.val:.4f} ({batch_time.avg:.4f})\t'
                 f'loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
-                f'miou {miou_meter.val:.4f} ({miou_meter.avg:.4f})\t'
+                f'miou {evaluator.Mean_Intersection_over_Union():.4f} ({miou_meter.avg:.4f})\t'
                 f'grad_norm {norm_meter.val:.4f} ({norm_meter.avg:.4f})\t'
                 f'loss_scale {scaler_meter.val:.4f} ({scaler_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
@@ -266,7 +272,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, data_loader, optimizer, e
 
 
 @torch.no_grad()
-def validate(config, ce_loss, dice_loss, data_loader, model):
+def validate(config, ce_loss, dice_loss, evaluator, data_loader, model):
     
     model.eval()
 
@@ -276,8 +282,9 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
     batch_time = AverageMeter()
     loss_meter = AverageMeter()
     miou_meter = AverageMeter()
-    metric_perclass = MulticlassJaccardIndex(num_classes=config.MODEL.NUM_CLASSES, average=None).cuda()
-    metric = MulticlassJaccardIndex(num_classes=config.MODEL.NUM_CLASSES).cuda()
+    # metric_perclass = MulticlassJaccardIndex(num_classes=config.MODEL.NUM_CLASSES, average=None).cuda()
+    # metric = MultilabelJaccardIndex(num_classes=config.MODEL.NUM_CLASSES).cuda()
+    evaluator.reset()
     end = time.time()
     running_loss = 0
     running_acc1 = 0
@@ -290,6 +297,7 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
         mask = mask.cuda(non_blocking=True)
         one_hot = one_hot.cuda(non_blocking=True)
         # compute output
+        # breakpoint()
         # with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
         output = model(images, dist, cls)
         # breakpoint()
@@ -302,14 +310,19 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
         loss_dice = dice_loss(output, target, softmax=True)
         loss = 0.4 * loss_ce + 0.6 * loss_dice
         # acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        pred = output.argmax(1)
-        miou = metric(pred, target)
+        # breakpoint() .
+        tar = target.cpu().numpy()
+        pred = output.argmax(1).cpu().numpy()
+        # pred = output.data.cpu().numpy()
+        evaluator.add_batch(tar, pred)
+        # miou = metric(pred, target)
+        # breakpoint()
         # acc1 = reduce_tensor(acc1)
         # acc5 = reduce_tensor(acc5)
         loss = reduce_tensor(loss)
 
         loss_meter.update(loss.item(), target.size(0))
-        miou_meter.update(miou.item(), target.size(0))
+        # miou_meter.update(miou.item(), target.size(0))
         # acc5_meter.update(acc5.item(), target.size(0))
         # wandb.log({"loss_val" : loss.item(), 
         #             "Acc1" : acc1, 
@@ -318,16 +331,16 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        # if (idx) % 1==0:
-        #     image= images[0,...].permute(1,2,0)
-        #     image*= torch.tensor(std).cuda()
-        #     image+= torch.tensor(mean).cuda()
-        #     plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
-        #     # + str(config.DATA.XI) + '/' +  
-        #     label = target[0].detach().cpu().numpy()
-        #     plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_label_{}.png'.format(idx), label.astype(np.uint8))
-        #     pred= output.argmax(1)[0].cpu().detach().numpy()
-        #     plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_pred_{}.png'.format(idx), pred)
+        if (idx) % 1==0:
+            image= images[0,...].permute(1,2,0)
+            image*= torch.tensor(std).cuda()
+            image+= torch.tensor(mean).cuda()
+            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
+            # + str(config.DATA.XI) + '/' +  
+            label = target[0].detach().cpu().numpy()
+            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_label_{}.png'.format(idx), label.astype(np.uint8))
+            pred= output.argmax(1)[0].cpu().detach().numpy()
+            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_pred_{}.png'.format(idx), pred)
 
         if idx % config.PRINT_FREQ == 0:
             memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
@@ -335,15 +348,17 @@ def validate(config, ce_loss, dice_loss, data_loader, model):
                 f'Test: [{idx}/{len(data_loader)}]\t'
                 f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                 f'Loss {loss_meter.val:.4f} ({loss_meter.avg:.4f})\t'
-                f'miou {miou_meter.val:.4f} ({miou_meter.avg:.4f})\t'
+                f'miou {evaluator.Mean_Intersection_over_Union():.4f} ({miou_meter.avg:.4f})\t'
                 f'Mem {memory_used:.0f}MB')
     # with open('/home-local2/akath.extra.nobkp/rad_gp4_gp4.pkl', 'wb') as f:
     #     pkl.dump(data_dic, f)
     # logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
+    # breakpoint()
+    miou = evaluator.Mean_Intersection_over_Union()
     wandb.log({"loss_val" :loss_meter.avg, 
-            "Acc1" : miou_meter.avg})
+            "Acc1" : miou})
 
-    return miou_meter.avg, loss_meter.avg
+    return miou, loss_meter.avg
 
 
 @torch.no_grad()

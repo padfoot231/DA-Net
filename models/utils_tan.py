@@ -587,7 +587,7 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
         xi = D[0]
         D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
         D_min = D_min*max_radius
-        import pdb;pdb.set_trace()
+        # import pdb;pdb.set_trace()
         # breakpoint()
     elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
         # 

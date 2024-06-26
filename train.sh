@@ -6,7 +6,7 @@ export PYTHONFAULTHANDLER=1
 
 
 python -m torch.distributed.launch \
---nproc_per_node 1 \
+--nproc_per_node 4 \
 --master_port 12345  main.py \
 --cfg configs/swin/CVRG_20_5.yaml \
 --output /home/prongs/scratch/Radial-unet \

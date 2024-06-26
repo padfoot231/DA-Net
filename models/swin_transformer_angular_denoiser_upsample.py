@@ -6,137 +6,25 @@
 # --------------------------------------------------------
 
 # from curses import window
-from envmap import EnvironmentMap
-from envmap import rotation_matrix
 import torch
 import torch.nn as nn
 import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils_curve import get_sample_params_from_subdiv, concentric_dic_sampling_origin
-# from utils_tan import get_sample_params_from_subdiv, concentric_dic_sampling_origin
+from utils_curve import get_sample_params_from_subdiv
+# from utils_tan import get_sample_params_from_subdiv
+from pykeops.torch import LazyTensor
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+from torch import nn
+import torch.nn.functional as F
+
+
 pi = 3.141592653589793
 
-def sph2cart(az, el, r):
-    x = r * np.cos(el) * np.cos(az)
-    y = r * np.cos(el) * np.sin(az)
-    z = r * np.sin(el)
-    return x, y, z
 
-#rad
-def compute_focal(fov, xi, width):
-    return width / 2 * (xi + np.cos(fov/2)) / np.sin(fov/2)
-
-
-def warpToFisheye(pano,outputdims,viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(0), np.deg2rad(0)],xi=0.9, fov=150, order=1):
-
-    outputdims1=outputdims[0]
-    outputdims2=outputdims[1]
-   
-    pitch, yaw, roll = np.array(viewingAnglesPYR)
-    #print(pano.shape)
-    # breakpoint()
-    e = EnvironmentMap(pano, format_='latlong')
-    e = e.rotate(rotation_matrix(yaw, -pitch, -roll).T)
-    r_max = max(outputdims1/2,outputdims2/2)
-
-    h= min(outputdims1,outputdims2)
-    f = compute_focal(np.deg2rad(fov),xi,h)
-    
-    t = np.linspace(0,fov/2, 100)
-   
-
-    #test spherical
-    # print('xi  {}, f {}'.format(xi,f))
-    theta= np.deg2rad(t)
-    funT = (f* np.sin(theta))/(np.cos(theta)+xi)
-    funT= funT/r_max
-
-
-    #creates the empty image
-    [u, v] = np.meshgrid(np.linspace(-1, 1, outputdims1), np.linspace(-1, 1, outputdims2))
-    r = np.sqrt(u ** 2 + v ** 2)
-    phi = np.arctan2(v, u)
-    validOut = r <= 1
-    # interpolate the _inverse_ function!
-    fovWorld = np.deg2rad(np.interp(x=r, xp=funT, fp=t))
-    # fovWorld = np.pi / 2 - np.arccos(r)
-    FOV = np.rad2deg((fovWorld))
-
-    el = fovWorld + np.pi / 2
-
-    # convert to XYZ
-    #ref
-    x, y, z = sph2cart(phi, fovWorld + np.pi / 2, 1)
-
-    x = -x
-    z = -z
-
-    #return values in [0,1]
-    #the source pixel from panorama 
-    [u1, v1] = e.world2image(x, y, z)
-    # breakpoint()
-    # Interpolate
-    #validout to set the background to black (the circle part)
-    eOut= e.interpolate(u1, v1, validOut, order)
-    #eOut= e.interpolate(u1, v1)
-    return eOut.data, f
-
-def KNN(x, c, P=10, k=1, verbose=True):
-    """
-    Implements Lloyd's algorithm for the Euclidean metric using Pykeops for efficient computation.
-    Supports multi-GPU computation.
-    
-    Parameters:
-    x (torch.Tensor): Input tensor of shape (B, N, D)
-    c (torch.Tensor): Centroid tensor of shape (B, P, D)
-    P (int): Number of centroids
-    k (int): Number of nearest neighbors
-    verbose (bool): If True, print information during execution
-    
-    Returns:
-    torch.Tensor: Indices of the nearest centroids for each point
-    """
-    B, N, D = x.shape  # Number of samples, dimension of the ambient space
-    _, P, _ = c.shape  # Number of centroids
-
-    # Ensure input tensors are on the same device
-    device = x.device
-    x = x.to(device)
-    c = c.to(device)
-
-    # Split data across GPUs
-    if torch.cuda.device_count() > 1:
-        x = torch.split(x, x.size(0) // torch.cuda.device_count())
-        c = torch.split(c, c.size(0) // torch.cuda.device_count())
-    else:
-        x = [x]
-        c = [c]
-
-    # Function to compute k-NN on a single GPU
-    def compute_knn_on_gpu(x_chunk, c_chunk, k):
-        x_i = LazyTensor(x_chunk.view(1, x_chunk.size(0), -1, D))  # Shape: (1, N, D)
-        c_j = LazyTensor(c_chunk.view(1, P, 1, D))  # Shape: (1, P, 1, D)
-        
-        # Compute squared distances
-        D_ij = ((x_i - c_j) ** 2).sum(dim=-1)  # Shape: (1, N, P)
-        knn_indices = D_ij.argKmin(k, dim=2)  # Shape: (1, N, k)
-        
-        return knn_indices
-
-    # Perform k-NN computation on each GPU
-    knn_results = []
-    for i in range(len(x)):
-        knn_results.append(compute_knn_on_gpu(x[i], c[i], k))
-        
-    # Gather results from all GPUs
-    knn_indices = torch.cat(knn_results, dim=1)  # Shape: (B, N, k)
-
-    if verbose:
-        print(f"Computed k-NN with shape: {knn_indices.shape}")
-
-    return knn_indices
 
 def restruct(output, cls, embed_dim, H, W):
     """
@@ -173,18 +61,17 @@ def restruct(output, cls, embed_dim, H, W):
     
     return out
 
-
-def restruct1(output, cls, embed_dim, H, W):
-    B, P, K = cls.shape
-    B, dim, patch, sample = output.shape
-    out_1 = output.view(B, dim, -1).transpose(1, 2).contiguous()
-    # out_1 = output.transpose(1, 2)
-    out = out_1[:, cls]
-    out = out.view(-1, P, K, dim)[0::B]
-    out = out.mean(2)
-    out = out.transpose(1, 2).contiguous()
-    out = out.reshape(B, embed_dim, H, W)
-    return out
+# def restruct(output, cls, embed_dim, H, W):
+#     B, P, K = cls.shape
+#     B, dim, patch, sample = output.shape
+#     out_1 = output.view(B, dim, -1).transpose(1, 2).contiguous()
+#     # out_1 = output.transpose(1, 2)
+#     out = out_1[:, cls]
+#     out = out.view(-1, P, K, dim)[0::B]
+#     out = out.mean(2)
+#     out = out.transpose(1, 2).contiguous()
+#     out = out.reshape(B, embed_dim, H, W)
+#     return out
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -218,21 +105,26 @@ def R(window_size, num_heads, radius, D, a_r, b_r, r_max):
     
     return A_r
 
-def theta(window_size, num_heads, radius, theta_max, a_r, b_r, H, P): # change theta_max to D
+
+def theta(window_size, num_heads, radius, theta_max, a_r, b_r, H): # change theta_max to D
+    a_r = a_r[radius]
+    b_r = b_r[radius]
     radius = radius*theta_max/H
     radius = radius[:, :, None].repeat(1, 1, num_heads)
-    A_r = 0
-    for i in range(1,P+1):
-        A_r += a_r[i]*torch.cos(i*radius) + b_r[i-1]*torch.sin(i*radius)
-    return A_r/P + a_r[0]
+    A_r = a_r*torch.cos(radius) + b_r*torch.sin(radius)
+    
+    return A_r
 
-def phi(window_size, num_heads, azimuth, a_p, b_p, W, P):
+def phi(window_size, num_heads, azimuth, a_p, b_p, W):
+    a_p = a_p[azimuth]
+    b_p = b_p[azimuth]
     azimuth = azimuth*2*np.pi/W
     azimuth = azimuth[:, :, None].repeat(1, 1, num_heads)
-    A_phi = 0
-    for i in range(1, P+1):
-        A_phi += a_p[i]*torch.cos(i*azimuth) + b_p[i-1]*torch.sin(i*azimuth)
-    return A_phi/P + a_p[0] 
+
+    A_phi = a_p*torch.cos(azimuth) + b_p*torch.sin(azimuth)
+    # import pdb;pdb.set_trace()
+    return A_phi 
+
 
 def window_partition(x, window_size):
     """
@@ -310,32 +202,30 @@ class WindowAttention(nn.Module):
 
         self.distortion_model = distortion_model
         # define a parameter table of relative position bias
-        # self.relative_position_bias_table = nn.Parameter(
-        #     torch.zeros((2 * window_size[0] - 1) * (2 * window_size[1] - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
-        self.a_p = nn.Parameter(
-            torch.zeros(self.P+1, num_heads))
-        self.b_p = nn.Parameter(
-            torch.zeros(self.P, num_heads))
-        self.a_r = nn.Parameter(
-            torch.zeros(self.P+1, num_heads))
-        self.b_r = nn.Parameter(
-            torch.zeros(self.P, num_heads))
+        # self.a_p = nn.Parameter(
+        #     torch.zeros(self.P+1, num_heads))
+        # self.b_p = nn.Parameter(
+        #     torch.zeros(self.P, num_heads))
+        # self.a_r = nn.Parameter(
+        #     torch.zeros(self.P+1, num_heads))
+        # self.b_r = nn.Parameter(
+        #     torch.zeros(self.P, num_heads))
         
 
-        # if input_resolution == window_size:
-        #     self.a_p = nn.Parameter(
-        #         torch.zeros(window_size[1], num_heads))
-        #     self.b_p = nn.Parameter(
-        #         torch.zeros(window_size[1], num_heads))
-        # else:
-        #     self.a_p = nn.Parameter(
-        #         torch.zeros((2 * window_size[1] - 1), num_heads))
-        #     self.b_p = nn.Parameter(
-        #         torch.zeros((2 * window_size[1] - 1), num_heads))
-        # self.a_r = nn.Parameter(
-        #     torch.zeros((2 * window_size[0] - 1), num_heads))
-        # self.b_r = nn.Parameter(
-        #     torch.zeros((2 * window_size[0] - 1), num_heads))
+        if input_resolution == window_size:
+            self.a_p = nn.Parameter(
+                torch.zeros(window_size[1], num_heads))
+            self.b_p = nn.Parameter(
+                torch.zeros(window_size[1], num_heads))
+        else:
+            self.a_p = nn.Parameter(
+                torch.zeros((2 * window_size[1] - 1), num_heads))
+            self.b_p = nn.Parameter(
+                torch.zeros((2 * window_size[1] - 1), num_heads))
+        self.a_r = nn.Parameter(
+            torch.zeros((2 * window_size[0] - 1), num_heads))
+        self.b_r = nn.Parameter(
+            torch.zeros((2 * window_size[0] - 1), num_heads))
 
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
@@ -389,9 +279,12 @@ class WindowAttention(nn.Module):
         # relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
         #     self.window_size[0] * self.window_size[1], self.window_size[0] * self.window_size[1], -1)  # Wh*Ww,Wh*Ww,nH
         # relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
-        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1], self.P)
-        A_theta = theta(self.window_size, self.num_heads, self.radius, theta_max, self.a_r, self.b_r, self.input_resolution[0], self.P) # change input_resolution[0] to r_max
+        # A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1], self.P)
+        # A_theta = theta(self.window_size, self.num_heads, self.radius, theta_max, self.a_r, self.b_r, self.input_resolution[0], self.P) # change input_resolution[0] to r_max
         
+        A_phi = phi(self.window_size, self.num_heads, self.azimuth, self.a_p, self.b_p, self.input_resolution[1])
+        A_theta = theta(self.window_size, self.num_heads, self.radius, theta_max, self.a_r, self.b_r, self.input_resolution[0]) # change input_resolution[0] to r_max
+
         attn = attn + A_phi.transpose(1, 2).transpose(0, 1).unsqueeze(0).contiguous() + A_theta.transpose(1, 2).transpose(0, 1).unsqueeze(0).contiguous()
 
         if mask is not None:
@@ -674,30 +567,46 @@ class PatchExpand(nn.Module):
         return x
 
 class FinalPatchExpand_X4(nn.Module):
-    def __init__(self, input_resolution, input_dim=96, dim=100, norm_layer=nn.LayerNorm, n_radius=10, n_azimuth=10):
+    def __init__(self, input_resolution, input_dim=96, dim=100, norm_layer=nn.LayerNorm, n_radius=10, n_azimuth=10, radius_cuts=32, azimuth_cuts= 128):
         super().__init__()
         self.input_resolution = input_resolution
         self.dim = dim
         # self.dim_scale = dim_scale
         self.n_radius = n_radius
         self.n_azimuth = n_azimuth
-        self.expand = nn.Linear(input_dim, n_radius*n_azimuth*dim, bias=False)
+        # kr = int(np.sqrt(n_radius))
+        kr1 = 5
+        kr2 = 5
+        ka = int(np.sqrt(n_azimuth))
+        # breakpoint()
+        self.azimuth_cuts = azimuth_cuts
+        self.radius_cuts = radius_cuts
+        self.m = nn.ConvTranspose2d(input_dim, input_dim, kernel_size = (kr1, ka), stride=(kr1, ka))
+        self.n = nn.ConvTranspose2d(input_dim, input_dim, kernel_size = (kr2, ka), stride=(kr2, ka))
+        # self.expand = nn.Linear(input_dim, n_radius*n_azimuth*dim, bias=False)
+        # self.expand = nn.Linear(input_dim, n_radius*n_azimuth*dim, bias=False)
         self.output_dim = dim
-        self.norm = norm_layer(self.output_dim)
+        self.norm = norm_layer(input_dim)
 
     def forward(self, x):
         """
         x: B, H*W, C
         """
         H, W = self.input_resolution
-        x = self.expand(x)
         B, L, C = x.shape
         assert L == H * W, "input feature has wrong size"
+        x = x.view(B, self.radius_cuts, self.azimuth_cuts, C).transpose(2, 3).transpose(1, 2)
+        # breakpoint()
+        x = self.m(self.n(x)).transpose(1, 2).transpose(2,3)
+        # x = x
+        # x = self.expand(x)
+        # B, L, C = x.shape
+        
 
-        x = x.view(B, L, self.n_radius*self.n_azimuth, self.output_dim)
+        # x = x.view(B, L, self.n_radius*self.n_azimuth, self.output_dim)
         # x = rearrange(x, 'b h w (p1 p2 c)-> b (h p1) (w p2) c', p1=self.dim_scale, p2=self.dim_scale, c=C//(self.dim_scale**2))
-        x = x.view(B,-1,self.output_dim)
-        x= self.norm(x)
+        # x = x.view(B,-1,self.output_dim)
+        x= self.norm(x).transpose(2, 3).transpose(1,2)
 
         return x
 
@@ -835,6 +744,50 @@ class BasicLayer_up(nn.Module):
             x = self.upsample(x, theta_max) #here theta_max doesn't do anything 
         return x
 
+class UDnCNN(nn.Module):
+
+    def __init__(self, D, C=96):
+        super(UDnCNN, self).__init__()
+        self.D = D
+
+        # convolution layers
+        self.conv = nn.ModuleList()
+        self.conv.append(nn.Conv2d(C, C, 3, padding=1))
+        self.conv.extend([nn.Conv2d(C, C, 3, padding=1) for _ in range(D)])
+        self.conv.append(nn.Conv2d(C, C, 3, padding=1))
+        # apply He's initialization
+        for i in range(len(self.conv[:-1])):
+            nn.init.kaiming_normal_(
+                self.conv[i].weight.data, nonlinearity='relu')
+
+        # batch normalization
+        self.bn = nn.ModuleList()
+        self.bn.extend([nn.BatchNorm2d(C, C) for _ in range(D)])
+        # initialize the weights of the Batch normalization layers
+        for i in range(D):
+            nn.init.constant_(self.bn[i].weight.data, 1.25 * np.sqrt(C))
+
+    def forward(self, x):
+        D = self.D
+        h = F.relu(self.conv[0](x))
+        h_buff = []
+        idx_buff = []
+        shape_buff = []
+        for i in range(D//2-1):
+            shape_buff.append(h.shape)
+            h, idx = F.max_pool2d(F.relu(self.bn[i](self.conv[i+1](h))),
+                                  kernel_size=(2, 2), return_indices=True)
+            h_buff.append(h)
+            idx_buff.append(idx)
+        for i in range(D//2-1, D//2+1):
+            h = F.relu(self.bn[i](self.conv[i+1](h)))
+        for i in range(D//2+1, D):
+            j = i - (D // 2 + 1) + 1
+            h = F.max_unpool2d(F.relu(self.bn[i](self.conv[i+1]((h+h_buff[-j])/np.sqrt(2)))),
+                               idx_buff[-j], kernel_size=(2, 2), output_size=shape_buff[-j])
+        y = self.conv[D+1](h) + x
+        return y
+
 class PatchEmbed(nn.Module):
     r""" Image to Patch Embedding
 
@@ -876,18 +829,23 @@ class PatchEmbed(nn.Module):
         # subdiv = 3
         self.n_radius = n_radius
         self.n_azimuth = n_azimuth
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=n_radius, stride=n_radius)
-
+        # kr = int(np.sqrt(n_radius))
+        kr1 = 5
+        kr2 = 5
+        ka = int(np.sqrt(n_azimuth))
+        self.proj1 = nn.Conv2d(in_chans, embed_dim, kernel_size=(kr1, ka), stride=(kr1, ka))
+        self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(kr2, ka), stride=(kr2, ka))
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:
             self.norm = None
 
-    def forward(self, x, dist, lab):
+    def forward(self, x, dist):
         B, C, H, W = x.shape
-
+        # print("ass")
         dist = dist.transpose(1,0)
         radius_buffer, azimuth_buffer = 0, 0
+        # breakpoint()
         xc, yc, theta_max = get_sample_params_from_subdiv(
             subdiv=self.subdiv,
             img_size=self.img_size,
@@ -901,15 +859,19 @@ class PatchEmbed(nn.Module):
         y_ = y_/(W//2)
         out = torch.cat((y_, x_), dim = 3)
         out = out.cuda()
-        breakpoint()
+        # breakpoint()
+
+    # y = torch.repeat_interleave(y, 2, 0).cuda("cuda:2")
+#     out = torch.cat((y_, x_), dim = 3)
+        # grid = torch.cat((x, y), dim=2)
+        # breakpoint()
+
 
         tensor = nn.functional.grid_sample(x, out, align_corners = True)
-        tensor_lab = nn.functional.grid_sample(lab, out, align_corners = True)
-        # tensor = self.proj(tensor).flatten(2).transpose(1, 2)
-        # if self.norm is not None:
-        #     tensor = self.norm(tensor)
-        breakpoint()
-        return tensor, tensor_lab, theta_max
+        tensor = self.proj2(self.proj1(tensor)).flatten(2).transpose(1, 2)
+        if self.norm is not None:
+            tensor = self.norm(tensor)
+        return tensor, theta_max
 
     def flops(self):
         Ho, Wo = self.patches_resolution
@@ -919,7 +881,7 @@ class PatchEmbed(nn.Module):
         return flops
 
 
-class SwinTransformerAng(nn.Module):
+class swin_transformer_angular_denoiser_upsample(nn.Module):
     r""" Swin Transformer
         A PyTorch impl of : `Swin Transformer: Hierarchical Vision Transformer using Shifted Windows`  -
           https://arxiv.org/pdf/2103.14030
@@ -1046,8 +1008,10 @@ class SwinTransformerAng(nn.Module):
 
         if self.final_upsample == "expand_first":
             print("---final upsample expand_first---")
-            self.up = FinalPatchExpand_X4(input_resolution=(patches_resolution[0], patches_resolution[1]),input_dim=embed_dim,dim=embed_dim, n_radius=n_radius, n_azimuth=n_azimuth)
-            self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
+            self.up = FinalPatchExpand_X4(input_resolution=(patches_resolution[0], patches_resolution[1]),input_dim=embed_dim,dim=embed_dim, n_radius=n_radius, n_azimuth=n_azimuth, radius_cuts=radius_cuts, azimuth_cuts= azimuth_cuts)
+            # self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
+            self.output = UDnCNN(D = 2, C = embed_dim)
+            self.final = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
 
 
         self.apply(self._init_weights)
@@ -1069,17 +1033,17 @@ class SwinTransformerAng(nn.Module):
     def no_weight_decay_keywords(self):
         return {'relative_position_bias_table'}
     
-    def forward_features(self, x, dist, lab):
-        x, x_lab, theta_max = self.patch_embed(x, dist, lab)
-        # if self.ape:
-        #     x = x + self.absolute_pos_embed
-        # x = self.pos_drop(x)
-        # x_downsample = []
-        # for layer in self.layers:
-        #     x_downsample.append(x)
-        #     x = layer(x, theta_max)
-        # x = self.norm(x)  # B L C
-        return x, x_lab, theta_max
+    def forward_features(self, x, dist):
+        x, theta_max = self.patch_embed(x, dist)
+        if self.ape:
+            x = x + self.absolute_pos_embed
+        x = self.pos_drop(x)
+        x_downsample = []
+        for layer in self.layers:
+            x_downsample.append(x)
+            x = layer(x, theta_max)
+        x = self.norm(x)  # B L C
+        return x, x_downsample, theta_max
 
     def forward_up_features(self, x, x_downsample, theta_max):
         for inx, layer_up in enumerate(self.layers_up):
@@ -1101,19 +1065,22 @@ class SwinTransformerAng(nn.Module):
         B, L, C = x.shape
         assert L == H*W, "input features has wrong size"
         if self.final_upsample=="expand_first":
+            # breakpoint()
             x = self.up(x)
-            x = x.view(B,L, self.n_radius*self.n_azmiuth,-1)
-            x = x.permute(0,3,1,2).contiguous() #B,C,H,W
+            # x = x.view(B,L, self.n_radius*self.n_azmiuth,-1)
+            # x = x.permute(0,3,1,2).contiguous() #B,C,H,W
         return x
-    def forward(self, x, dist, cls, lab):
-        x, x_lab, theta_max = self.forward_features(x, dist, lab)
-        breakpoint()
-        # x = self.forward_up_features(x ,x_downsample, theta_max)
-        # x = self.up_x4(x)
+    def forward(self, x, dist, cls):
+        x, x_downsample, theta_max = self.forward_features(x, dist)
+        x = self.forward_up_features(x ,x_downsample, theta_max)
+        x = self.up_x4(x)
 
-        img = restruct(x, cls, 3, self.img_size, self.img_size)
-        lab = restruct(x_lab, cls, 3, self.img_size, self.img_size)
-        return x, x_lab, img, lab
+        # cl = KNN(grid_, grid_pix/(self.img_size//2), P, k)
+        x = restruct(x, cls, self.embed_dim, self.img_size, self.img_size)
+        # breakpoint()
+        x = self.output(x)
+        x = self.final(x)
+        return x
 
     def flops(self):
         flops = 0
@@ -1125,14 +1092,7 @@ class SwinTransformerAng(nn.Module):
         return flops
 
 if __name__=='__main__':
-    from torchvision import transforms
-    from PIL import Image, ImageOps
-    import pickle as pkl
-
-    T = transforms.ToTensor()
-    pil = transforms.ToPILImage()
-
-    model = SwinTransformerAng(img_size=128,
+    model = swin_transformer_angular_denoiser_upsample(img_size=128,
                         radius_cuts=32, 
                         azimuth_cuts=128,
                         in_chans=3,
@@ -1152,6 +1112,18 @@ if __name__=='__main__':
                         use_checkpoint=False,
                         n_radius = 25,
                         n_azimuth = 4)
+    model = model.cuda()
+    
+
+if __name__=='__main__':
+    from torchvision import transforms
+    from PIL import Image, ImageOps
+    import pickle as pkl
+
+    T = transforms.ToTensor()
+    pil = transforms.ToPILImage()
+
+
     model = model.cuda()
     
 
@@ -1176,27 +1148,24 @@ if __name__=='__main__':
     # dist = torch.tensor(dist).reshape(1, 3).cuda()
     # breakpoint()
     # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/12NN_25_4_curve_test.pkl', 'rb') as f:
+    with open('/home/prongs/scratch/25_4_cl_curve_train.pkl', 'rb') as f:
         data = pkl.load(f)
     # with open('/home/prongs/scratch/0.9.pkl', 'rb') as f:
     #     data = pkl.load(f)
-    breakpoint()
-    i = 0.0
-    xi = data[i][2]
-    f = data[i][1]
-    cls = data[i][0]
+    xi = data[0][2]
+    xi = 0.0
+    f = data[0][1]
+    cls = data[0][0]
     # h = 128
-    breakpoint()
     # image, f = warpToFisheye(img, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
     # lab, f = warpToFisheye(label, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
-    dist = torch.tensor(np.array([xi, f,  3.05433]).reshape(1, 3)).float().cuda()
+    dist = torch.tensor([ 0.05, 59.2647,  3.05433]).reshape(1, 3).cuda()
     # dist = torch.tensor(np.array([0.0, 11.17720,  3.05433]).reshape(1, 3)).float().cuda()
     # cls = np.load('key_10t10_1.pkl.npy')
     # cls = data[0]
+    cls = cls.reshape(1, cls.shape[0], cls.shape[1])
     # breakpoint()
-    cls = cls.reshape(1, cls.shape[0], cls.shape[1]).cuda()
-    # breakpoint()
-    pol, pol_lab, cart, cart_lab = model(img, dist, cls, lab)
+    img = model(img, dist, cls)
     pol = pil(pol[0])
     cart = pil(cart[0])
     pol_lab = pil(pol_lab[0])
@@ -1207,8 +1176,7 @@ if __name__=='__main__':
     # img = Image.open('04087_FV.png')
     # img = img.resize((128, 128))
     # img.save('296test.png')
-    breakpoint()
-    cart.save('cart_new.png')
+    cart.save('cart.png')
     cart_lab.save('cart_lab.png')
     breakpoint()
     print("ass")
