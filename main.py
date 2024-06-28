@@ -335,12 +335,12 @@ def validate(config, ce_loss, dice_loss, evaluator, data_loader, model):
             image= images[0,...].permute(1,2,0)
             image*= torch.tensor(std).cuda()
             image+= torch.tensor(mean).cuda()
-            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
+            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + 'val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
             # + str(config.DATA.XI) + '/' +  
             label = target[0].detach().cpu().numpy()
-            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_label_{}.png'.format(idx), label.astype(np.uint8))
+            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + 'val_label_{}.png'.format(idx), label.astype(np.uint8))
             pred= output.argmax(1)[0].cpu().detach().numpy()
-            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + '/val_pred_{}.png'.format(idx), pred)
+            plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + 'val_pred_{}.png'.format(idx), pred)
 
         if idx % config.PRINT_FREQ == 0:
             memory_used = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)

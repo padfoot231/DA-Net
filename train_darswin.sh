@@ -1,5 +1,5 @@
 #!/bin/bash 
-export WANDB_MODE="disabled"
+#export WANDB_MODE="disabled"
 # export NCCL_BLOCKING_WAIT=1 
 # export NCCL_DEBUG=INFO
 # export PYTHONFAULTHANDLER=1

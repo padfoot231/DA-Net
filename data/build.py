@@ -159,7 +159,7 @@ def build_dataset(is_train, config):
             dataset = Stanford(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
             nb_classes =14
         else:
-            dataset = Stanford(config.DATA.DATA_PATH, split = 'test', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
+            dataset = Stanford(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
             nb_classes =14
 
     else:

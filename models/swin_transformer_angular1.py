@@ -1176,12 +1176,12 @@ if __name__=='__main__':
     # dist = torch.tensor(dist).reshape(1, 3).cuda()
     # breakpoint()
     # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/12NN_25_4_curve_test.pkl', 'rb') as f:
+    with open('/home/prongs/scratch/12NN_25_4_curves_test.pkl', 'rb') as f:
         data = pkl.load(f)
     # with open('/home/prongs/scratch/0.9.pkl', 'rb') as f:
     #     data = pkl.load(f)
     breakpoint()
-    i = 0.0
+    i = 0
     xi = data[i][2]
     f = data[i][1]
     cls = data[i][0]
