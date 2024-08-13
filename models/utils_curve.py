@@ -553,41 +553,18 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
         return -torch.pow(-x/a + 1, m) + 1
     def g(x, m, n, a, b, c):
         return c*f(x, n, a, b) + (1-c)*h(x, m, a)
-    # def g_inv(y, m, n, a, b, c):
-    #     test_x = torch.linspace(0, theta_d_max, 20000).cuda()
-    #     test_y = g(test_x, m, n, a, b, c).cuda()
-    #     # breakpoint()
-    #     x = torch.zeros(num_points).cuda()
-    #     for i in range(num_points):
-    #         lower_idx = test_y[test_y <= y[i]].argmax()
-    #         x[i] = test_x[lower_idx]
-    #     return x
-
     def g_inv(y, m, n, a, b, c):
-        # Create a high-resolution test set
-        test_x = torch.linspace(0, theta_d_max, 100000).cuda()
+        test_x = torch.linspace(0, theta_d_max, 3000).cuda()
         test_y = g(test_x, m, n, a, b, c).cuda()
-        
-        # Preallocate the result array
         x = torch.zeros(num_points).cuda()
-        # breakpoint()
-        # Use binary search to find the closest values
         for i in range(num_points):
-            low, high = 0, len(test_x) - 1
-            while low <= high:
-                mid = (low + high) // 2
-                if test_y[mid] < y[i]:
-                    low = mid + 1
-                else:
-                    high = mid - 1
-            x[i] = test_x[low]
-        
+            lower_idx = test_y[test_y <= y[i]].argmax()
+            x[i] = test_x[lower_idx]
         return x
 
     # rad = lambda x: new_f*torch.sin(torch.arctan(x))/(xi + torch.cos(torch.arctan(x))) 
     def rad(xi, theta):
         funct = g_inv(theta, m = m, n = n, a = a, b = b, c = c)
-        # breakpoint()
         funct = funct.reshape(num_points, 1)
         # breakpoint()
         radius = ((torch.cos(funct[-1]) + xi)/torch.sin(funct[-1]))*torch.sin(funct)/(torch.cos(funct) + xi)
@@ -598,20 +575,6 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # theta_d = linspace(torch.tensor([0]).cuda(), g(theta_d_max), num_points+1).cuda()
     theta_d = torch.linspace(0, g(theta_d_max, m = m, n = n, a = a, b = b, c = c), num_points + 1).cuda()
 
-    delta = float(torch.diff(theta_d, axis=0)[0])
-    thresh = np.random.uniform(0, 1)
-    err = np.random.uniform(0, delta/2)
-    thresh = 0.5
-    # breakpoint()
-    if  thresh > 0.5:
-        err = np.random.uniform(0, delta/2)
-        theta_d = theta_d + err
-        # theta_d[-1] = torch.tan(torch.tensor(fov))
-        theta_d[-1] = g(theta_d_max, m = m, n = n, a = a, b = b, c = c)
-    # elif thresh < 0.5 or thresh == 0.5:
-    elif thresh < 0.5:
-        theta_d = theta_d - err
-        theta_d[0] = 0.0
     # r_list = rad(theta_d)
     # breakpoint()
     r_list = rad(xi, theta_d)
@@ -619,10 +582,9 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # print("theta")
     # r_lin = rad(theta_d_num)
     # r_d = rad(theta_d_num1)
-    # breakpoint()
-    return r_list, g(theta_d_max, m = m, n = n, a = a, b = b, c = c)
+    return r_list, theta_d_max
 
-def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
+def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda(), radius_buffer=0, azimuth_buffer=0):
     """Generate the required parameters to sample every patch based on the subdivison
     Args:
         subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
@@ -644,7 +606,6 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
         D_min = D_min*max_radius
         # breakpoint()
     elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
-        # 
         D_min, theta_max = get_inverse_distortion(subdiv[0], D, 1.0)
         D_min = D_min*max_radius
     # breakpoint()
@@ -661,7 +622,6 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
     x = D_min * phi_list_cos    # takes time the cosine and multiplication function 
     y = D_min * phi_list_sine
     return x.transpose(1, 2).transpose(0,1), y.transpose(1, 2).transpose(0,1), theta_max
-
 
 def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
     """Generate the required parameters to sample every patch based on the subdivison
@@ -726,7 +686,7 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     # r_ = torch.rand(128, B)  # Assuming r_ is provided
 
     # Create meshgrid for a and b
-    # breakpoint()
+    
     B  = D.shape[1]
     A, B_mesh = torch.meshgrid(a, b, indexing='ij')  # Shape: (H, H)
 
@@ -761,32 +721,6 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     x = radius*torch.cos(phi)
     y = radius*torch.sin(phi)
     return x, y, theta_max
-
-# def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
-#     """Get the optimal radius and azimuth buffers for a given subdivision
-
-#     Args:
-#         subdiv (int or tuple[int, int]): the number of subdivisions for which we need to create the samples.
-#                                          If specified as a tuple, the format is (radius_subdiv, azimuth_subdiv)
-#         n_radius (int): number of radius samples
-#         n_azimuth (int): number of azimuth samples
-#         img_size (tuple): the size of the image
-
-#     Returns:
-#         tuple[int, int]: the optimal radius and azimuth buffers
-#     """
-
-#     # Get the optimal buffers
-#     if isinstance(subdiv, int):
-#         radius_buffer = img_size[0] / (2**(subdiv+1)*n_radius)
-#         azimuth_buffer = 2*np.pi / (2**(subdiv+2)*n_azimuth)
-#     elif isinstance(subdiv, tuple) and len(subdiv) == 2:
-#         radius_buffer = img_size[0] / (radius_subdiv*n_radius*2*2)
-#         azimuth_buffer = 2*np.pi / (azimuth_subdiv*n_azimuth*2)
-#     else:
-#         raise ValueError("Invalid subdivision")
-   
-#     return radius_buffer, azimuth_buffer
 
 
 class DiceLoss(nn.Module):

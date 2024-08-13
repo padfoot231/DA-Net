@@ -27,7 +27,6 @@ from matplotlib import pyplot as plt
 from torchmetrics.classification import MulticlassJaccardIndex, MultilabelJaccardIndex
 
 
-
 # from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from torch.nn.modules.loss import CrossEntropyLoss
 
@@ -208,7 +207,6 @@ def train_one_epoch(config, model, ce_loss, dice_loss, evaluator, data_loader, o
         # breakpoint()
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
         outputs[:, :, mask[0, 0] == 0] = one_hot[:, :, mask[0, 0] == 0]
-        
         # breakpoint()
         loss_ce = ce_loss(outputs, targets[:].long())
         loss_dice = dice_loss(outputs, targets, softmax=True)
@@ -331,7 +329,7 @@ def validate(config, ce_loss, dice_loss, evaluator, data_loader, model):
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-        if (idx) % 1==0:
+        if False:
             image= images[0,...].permute(1,2,0)
             image*= torch.tensor(std).cuda()
             image+= torch.tensor(mean).cuda()

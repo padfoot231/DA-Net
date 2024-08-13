@@ -121,11 +121,9 @@ class Woodscape_dataset(Dataset):
     def __getitem__(self, idx):
         img_path = self.data_dir + '/rgb_images/' + self.data[idx]
         lbl_path = self.data_dir + '/gtLabels/' + self.data[idx]
-        mat_path = self.data_dir + '/matrix_r_theta_10/'+ '1_4_' + self.data[idx][:-4] + '_img.png.pkl.npy'
         img = Image.open(img_path).convert('RGB')
         segm = Image.open(lbl_path).convert('L')
         key = self.data[idx][:-4] + '_img.png'
-        cls = np.load(mat_path)
 
         dist = self.calib[key].astype(np.float32)
         assert(segm.mode == "L")
@@ -169,7 +167,7 @@ class Woodscape_dataset(Dataset):
         sample['one_hot'] = one_hot
         sample['mask'] = mask1[0].to(torch.long)
         # sample = {'image': img, 'label': segm, 'dist':dist, 'class':cls}
-        return sample['image'], sample['label'], sample['dist'] , cls, sample['mask'], one_hot
+        return sample['image'], sample['label'], sample['dist'] , sample['mask'], one_hot
 
 def get_mean_std(base_dir ):
     db= Woodscape_dataset(base_dir, split="train", transform=None)

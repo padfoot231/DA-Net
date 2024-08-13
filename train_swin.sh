@@ -6,8 +6,8 @@ python -m torch.distributed.launch \
 --nproc_per_node 4 \
 --master_port 12345  main.py \
 --cfg configs/swin/CVRG_swin.yaml \
---output /home/prongs/scratch/Swin-unet-disc_sem \
---data-path  $SLURM_TMPDIR/data/semantic2d3d \
+--output /home/prongs/scratch/Swin-unet-disc-sem-new \
+--data-path  $SLURM_TMPDIR/data_new/semantic2d3d \
 --fov 175.0 \
 --xi 0.0 \
 --batch-size 8

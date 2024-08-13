@@ -62,7 +62,7 @@ _C.MODEL.PRETRAINED = ''
 # Checkpoint to resume, could be overwritten by command line argument
 _C.MODEL.RESUME = ''
 # Number of classes, overwritten in data preparation
-_C.MODEL.NUM_CLASSES = 14 #20
+_C.MODEL.NUM_CLASSES = 10 #20
 # Dropout rate
 _C.MODEL.DROP_RATE = 0.0
 # Drop path rate

@@ -888,7 +888,7 @@ class PatchEmbed(nn.Module):
 
         dist = dist.transpose(1,0)
         radius_buffer, azimuth_buffer = 0, 0
-        xc, yc, theta_max = get_sample_params_from_subdiv(
+        xc, yc, theta_max = concentric_dic_sampling_origin(
             subdiv=self.subdiv,
             img_size=self.img_size,
             distortion_model = self.distoriton_model,
@@ -904,6 +904,8 @@ class PatchEmbed(nn.Module):
         breakpoint()
 
         tensor = nn.functional.grid_sample(x, out, align_corners = True)
+        # tensor = torch.flip(tens or, dims=[2,3])
+        # tensor = torch.flip(tensor, dims=[2,3])
         tensor_lab = nn.functional.grid_sample(lab, out, align_corners = True)
         # tensor = self.proj(tensor).flatten(2).transpose(1, 2)
         # if self.norm is not None:
@@ -987,87 +989,87 @@ class SwinTransformerAng(nn.Module):
         self.patches_resolution = patches_resolution ### need to calculate FLOPS ( use later )
         patch_size = self.patch_embed.patch_size
         # absolute position embedding
-        if self.ape:
-            self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
-            trunc_normal_(self.absolute_pos_embed, std=.02)
+    #     if self.ape:
+    #         self.absolute_pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
+    #         trunc_normal_(self.absolute_pos_embed, std=.02)
 
-        self.pos_drop = nn.Dropout(p=drop_rate)
+    #     self.pos_drop = nn.Dropout(p=drop_rate)
 
-        # stochastic depth
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
-        # import pdb;pdb.set_trace()
-        # build layers
-        self.layers = nn.ModuleList()
-        for i_layer in range(self.num_layers):
-            layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
-                               input_resolution=(patches_resolution[0] // (1 ** i_layer),
-                                                 patches_resolution[1] // (4 ** i_layer)),
-                                patch_size = patch_size,
-                               depth=depths[i_layer],
-                               num_heads=num_heads[i_layer],
-                               window_size=window_size,
-                               mlp_ratio=self.mlp_ratio,
-                               qkv_bias=qkv_bias, qk_scale=qk_scale,
-                               drop=drop_rate, attn_drop=attn_drop_rate,
-                               drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
-                               norm_layer=norm_layer,
-                               downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
-                               use_checkpoint=use_checkpoint, distortion_model=distortion_model)
-            self.layers.append(layer)
-        ## build decoder layers 
-        self.layers_up = nn.ModuleList()
-        self.concat_back_dim = nn.ModuleList()
-        for i_layer in range(self.num_layers):
-            concat_linear = nn.Linear(2*int(embed_dim*2**(self.num_layers-1-i_layer)),
-            int(embed_dim*2**(self.num_layers-1-i_layer))) if i_layer > 0 else nn.Identity()
-            if i_layer ==0 :
-                layer_up = PatchExpand(input_resolution=(patches_resolution[0] // (1 ** (self.num_layers-1-i_layer)),
-                patches_resolution[1] // (2 ** (2*(self.num_layers-1-i_layer)))), dim=int(embed_dim * 2 ** (self.num_layers-1-i_layer)), dim_scale=2, norm_layer=norm_layer)
-            else:
-                layer_up = BasicLayer_up(dim=int(embed_dim * 2 ** (self.num_layers-1-i_layer)),
-                                input_resolution=(patches_resolution[0] // (1 ** (self.num_layers-1-i_layer)),
-                                                    patches_resolution[1] // (2 ** (2*(self.num_layers-1-i_layer)))),
-                                patch_size = patch_size,
-                                depth=depths[(self.num_layers-1-i_layer)],
-                                num_heads=num_heads[(self.num_layers-1-i_layer)],
-                                window_size=window_size,
-                                mlp_ratio=self.mlp_ratio,
-                                qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                drop=drop_rate, attn_drop=attn_drop_rate,
-                                drop_path=dpr[sum(depths[:(self.num_layers-1-i_layer)]):sum(depths[:(self.num_layers-1-i_layer) + 1])],
-                                norm_layer=norm_layer,
-                                upsample=PatchExpand if (i_layer < self.num_layers - 1) else None,
-                                use_checkpoint=use_checkpoint, distortion_model=distortion_model)
-            self.layers_up.append(layer_up)
-            self.concat_back_dim.append(concat_linear)
+    #     # stochastic depth
+    #     dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
+    #     # import pdb;pdb.set_trace()
+    #     # build layers
+    #     self.layers = nn.ModuleList()
+    #     for i_layer in range(self.num_layers):
+    #         layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
+    #                            input_resolution=(patches_resolution[0] // (1 ** i_layer),
+    #                                              patches_resolution[1] // (4 ** i_layer)),
+    #                             patch_size = patch_size,
+    #                            depth=depths[i_layer],
+    #                            num_heads=num_heads[i_layer],
+    #                            window_size=window_size,
+    #                            mlp_ratio=self.mlp_ratio,
+    #                            qkv_bias=qkv_bias, qk_scale=qk_scale,
+    #                            drop=drop_rate, attn_drop=attn_drop_rate,
+    #                            drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
+    #                            norm_layer=norm_layer,
+    #                            downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
+    #                            use_checkpoint=use_checkpoint, distortion_model=distortion_model)
+    #         self.layers.append(layer)
+    #     ## build decoder layers 
+    #     self.layers_up = nn.ModuleList()
+    #     self.concat_back_dim = nn.ModuleList()
+    #     for i_layer in range(self.num_layers):
+    #         concat_linear = nn.Linear(2*int(embed_dim*2**(self.num_layers-1-i_layer)),
+    #         int(embed_dim*2**(self.num_layers-1-i_layer))) if i_layer > 0 else nn.Identity()
+    #         if i_layer ==0 :
+    #             layer_up = PatchExpand(input_resolution=(patches_resolution[0] // (1 ** (self.num_layers-1-i_layer)),
+    #             patches_resolution[1] // (2 ** (2*(self.num_layers-1-i_layer)))), dim=int(embed_dim * 2 ** (self.num_layers-1-i_layer)), dim_scale=2, norm_layer=norm_layer)
+    #         else:
+    #             layer_up = BasicLayer_up(dim=int(embed_dim * 2 ** (self.num_layers-1-i_layer)),
+    #                             input_resolution=(patches_resolution[0] // (1 ** (self.num_layers-1-i_layer)),
+    #                                                 patches_resolution[1] // (2 ** (2*(self.num_layers-1-i_layer)))),
+    #                             patch_size = patch_size,
+    #                             depth=depths[(self.num_layers-1-i_layer)],
+    #                             num_heads=num_heads[(self.num_layers-1-i_layer)],
+    #                             window_size=window_size,
+    #                             mlp_ratio=self.mlp_ratio,
+    #                             qkv_bias=qkv_bias, qk_scale=qk_scale,
+    #                             drop=drop_rate, attn_drop=attn_drop_rate,
+    #                             drop_path=dpr[sum(depths[:(self.num_layers-1-i_layer)]):sum(depths[:(self.num_layers-1-i_layer) + 1])],
+    #                             norm_layer=norm_layer,
+    #                             upsample=PatchExpand if (i_layer < self.num_layers - 1) else None,
+    #                             use_checkpoint=use_checkpoint, distortion_model=distortion_model)
+    #         self.layers_up.append(layer_up)
+    #         self.concat_back_dim.append(concat_linear)
         
-        self.norm = norm_layer(self.num_features)
-        self.norm_up= norm_layer(self.embed_dim)
+    #     self.norm = norm_layer(self.num_features)
+    #     self.norm_up= norm_layer(self.embed_dim)
 
-        if self.final_upsample == "expand_first":
-            print("---final upsample expand_first---")
-            self.up = FinalPatchExpand_X4(input_resolution=(patches_resolution[0], patches_resolution[1]),input_dim=embed_dim,dim=embed_dim, n_radius=n_radius, n_azimuth=n_azimuth)
-            self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
+    #     if self.final_upsample == "expand_first":
+    #         print("---final upsample expand_first---")
+    #         self.up = FinalPatchExpand_X4(input_resolution=(patches_resolution[0], patches_resolution[1]),input_dim=embed_dim,dim=embed_dim, n_radius=n_radius, n_azimuth=n_azimuth)
+    #         self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
 
 
-        self.apply(self._init_weights)
+    #     self.apply(self._init_weights)
 
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+    # def _init_weights(self, m):
+    #     if isinstance(m, nn.Linear):
+    #         trunc_normal_(m.weight, std=.02)
+    #         if isinstance(m, nn.Linear) and m.bias is not None:
+    #             nn.init.constant_(m.bias, 0)
+    #     elif isinstance(m, nn.LayerNorm):
+    #         nn.init.constant_(m.bias, 0)
+    #         nn.init.constant_(m.weight, 1.0)
 
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {'absolute_pos_embed'}
+    # @torch.jit.ignore
+    # def no_weight_decay(self):
+    #     return {'absolute_pos_embed'}
 
-    @torch.jit.ignore
-    def no_weight_decay_keywords(self):
-        return {'relative_position_bias_table'}
+    # @torch.jit.ignore
+    # def no_weight_decay_keywords(self):
+    #     return {'relative_position_bias_table'}
     
     def forward_features(self, x, dist, lab):
         x, x_lab, theta_max = self.patch_embed(x, dist, lab)
@@ -1110,10 +1112,10 @@ class SwinTransformerAng(nn.Module):
         breakpoint()
         # x = self.forward_up_features(x ,x_downsample, theta_max)
         # x = self.up_x4(x)
-
+        # img = torch.zeros(1, 3, 128, 128)
         img = restruct(x, cls, 3, self.img_size, self.img_size)
-        lab = restruct(x_lab, cls, 3, self.img_size, self.img_size)
-        return x, x_lab, img, lab
+        # lab = restruct(x_lab, cls, 3, self.img_size, self.img_size)
+        return x, x_lab, img
 
     def flops(self):
         flops = 0
@@ -1133,8 +1135,8 @@ if __name__=='__main__':
     pil = transforms.ToPILImage()
 
     model = SwinTransformerAng(img_size=128,
-                        radius_cuts=32, 
-                        azimuth_cuts=128,
+                        radius_cuts=64,  
+                        azimuth_cuts=64,
                         in_chans=3,
                         num_classes=200,
                         embed_dim=96,
@@ -1150,25 +1152,42 @@ if __name__=='__main__':
                         ape=False,
                         patch_norm=True,
                         use_checkpoint=False,
-                        n_radius = 25,
-                        n_azimuth = 4)
+                        n_radius = 5,
+                        n_azimuth = 5)
     model = model.cuda()
     
 
     t = torch.ones(1, 3, 128, 128).float().cuda()
     # img = Image.open('img-282.png')
     # label = Image.open('img-282_0.0.png')
-    img = Image.open('04087_FV.png')
-    label = Image.open('04087_FV.png')
+    img = Image.open('img-282.png')
+    label = Image.open('06555_MVR.png')
+
+    img1 = Image.open('04087_FV.png')
+    label1 = Image.open('06555_MVR.png')
+
     # image.save('new.png')
     # lab.save('new_lab.png')
     # breakpoint()
     img = img.resize((128, 128))
+    img.save('resize.png')
     lab = label.resize((128, 128))
     img = T(img)
     lab = T(lab)
     lab = lab.unsqueeze(0).cuda()
     img = img.unsqueeze(0).cuda()
+
+    img1 = img1.resize((128, 128))
+    img1.save('resize.png')
+    lab1 = label1.resize((128, 128))
+    img1 = T(img1)
+    lab1 = T(lab1)
+    lab1 = lab1.unsqueeze(0).cuda()
+    img1 = img1.unsqueeze(0).cuda()
+
+
+    im = torch.cat((img1, img), dim = 0)
+    l = torch.cat((lab, lab1), dim = 0)
     # with open('../data/text.pkl', 'rb') as f:
     #     data = pkl.load(f)
 
@@ -1176,39 +1195,48 @@ if __name__=='__main__':
     # dist = torch.tensor(dist).reshape(1, 3).cuda()
     # breakpoint()
     # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/12NN_25_4_curves_test.pkl', 'rb') as f:
+    # print('')
+    n_rad = 5
+    img_size = 128
+    with open('/home/prongs/scratch//12NN_' + str(n_rad) + '_' + str(img_size) +  '_concentric.pkl', 'rb') as f:
         data = pkl.load(f)
     # with open('/home/prongs/scratch/0.9.pkl', 'rb') as f:
     #     data = pkl.load(f)
-    breakpoint()
     i = 0
     xi = data[i][2]
     f = data[i][1]
     cls = data[i][0]
     # h = 128
-    breakpoint()
     # image, f = warpToFisheye(img, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
     # lab, f = warpToFisheye(label, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
     dist = torch.tensor(np.array([xi, f,  3.05433]).reshape(1, 3)).float().cuda()
+    dist1 = torch.tensor(np.array([xi, f,  3.05433]).reshape(1, 3)).float().cuda()
+    dist = torch.cat((dist, dist1), dim = 0)
     # dist = torch.tensor(np.array([0.0, 11.17720,  3.05433]).reshape(1, 3)).float().cuda()
     # cls = np.load('key_10t10_1.pkl.npy')
     # cls = data[0]
     # breakpoint()
-    cls = cls.reshape(1, cls.shape[0], cls.shape[1]).cuda()
-    # breakpoint()
-    pol, pol_lab, cart, cart_lab = model(img, dist, cls, lab)
-    pol = pil(pol[0])
-    cart = pil(cart[0])
+    cls1 = cls.reshape(1, cls.shape[0], cls.shape[1]).cuda()
+    cls2 = cls.reshape(1, cls.shape[0], cls.shape[1]).cuda()
+    cls = torch.cat((cls1, cls2), dim = 0)
+    breakpoint()
+    # im = im[1].reshape(1, 3, 128, 128)
+    # l = l[1].reshape(1, 3, 128, 128)
+    # dist = dist[1].reshape(1, 3)
+    # cls = cls[1].reshape(1, 16384, 12)
+    pol, pol_lab, cart = model(im, dist, cls, l)
+    pol = pil(pol[1])
+    cart = pil(cart[1])
     pol_lab = pil(pol_lab[0])
-    cart_lab = pil(cart_lab[0])
-    pol_flip = ImageOps.flip(pol)
-    pol_flip.save('polar_new1.png')
+    # cart_lab = pil(cart_lab[0])
+    # pol_flip = ImageOps.flip(pol)
+    pol.save('polar_new1.png')
     pol_lab.save('polar_lab_new.png')
     # img = Image.open('04087_FV.png')
     # img = img.resize((128, 128))
     # img.save('296test.png')
     breakpoint()
-    cart.save('cart_new.png')
+    cart.save('cart_new1.png')
     cart_lab.save('cart_lab.png')
     breakpoint()
     print("ass")

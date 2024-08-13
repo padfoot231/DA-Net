@@ -3,12 +3,13 @@ MODEL:
   NAME: swin_new
   DROP_PATH_RATE: 0.2
   NUM_CLASSES: 20
+  NRADIUS: 3
   SWIN:
     EMBED_DIM: 96
     FINAL_UPSAMPLE: "expand_first"
     DEPTHS: [ 2, 2, 18, 2 ]
     NUM_HEADS: [ 3, 6, 12, 24 ]
-    WINDOW_SIZE_GRID: 4
+    WINDOW_SIZE_GRID: 8
 DATA:
   HIGH: 0.8
   LOW: 0.93

@@ -733,7 +733,7 @@ class SwinTransformerSys(nn.Module):
             
         return x
 
-    def forward(self, x, dist, cls):
+    def forward(self, x, dist, lab):
         x, x_downsample = self.forward_features(x)
         x = self.forward_up_features(x,x_downsample)
         x = self.up_x4(x)
