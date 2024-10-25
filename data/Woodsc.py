@@ -95,7 +95,7 @@ class RandomGenerator(object):
 
 
 class Woodscape_dataset(Dataset):
-    def __init__(self, base_dir, split, img_size = 128, transform=None):
+    def __init__(self, base_dir, split, img_size = (768, 768), transform=None):
         self.transform = transform  # using transform in torch!
         self.split = split
         
@@ -110,6 +110,7 @@ class Woodscape_dataset(Dataset):
                 data = json.load(f)
         with open(base_dir + '/calib.pkl', 'rb') as f:
             calib = pkl.load(f)
+
         self.calib = calib
         self.data = data
         self.data_dir = base_dir
@@ -119,13 +120,18 @@ class Woodscape_dataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
+        name = self.data[idx]
         img_path = self.data_dir + '/rgb_images/' + self.data[idx]
         lbl_path = self.data_dir + '/gtLabels/' + self.data[idx]
         img = Image.open(img_path).convert('RGB')
         segm = Image.open(lbl_path).convert('L')
-        key = self.data[idx][:-4] + '_img.png'
+        key_calib = self.data[idx][:-4] + "_img" + ".png"
+        # breakpoint()
+        dist = self.calib[key_calib]
+    
 
-        dist = self.calib[key].astype(np.float32)
+        # dist = torch.tensor([k1, k2, k3, k4], dtype=torch.float32)
+
         assert(segm.mode == "L")
         assert(img.size[0] == segm.size[0])
         assert(img.size[1] == segm.size[1])
@@ -137,8 +143,8 @@ class Woodscape_dataset(Dataset):
 
         # import pdb;pdb.set_trace()
         # note that each sample within a mini batch has different scale param
-        img = imresize(img, (self.img_size, self.img_size), interp='bilinear')
-        segm = imresize(segm, (self.img_size,self.img_size), interp='nearest')
+        img = imresize(img, (self.img_size), interp='bilinear')
+        segm = imresize(segm, (self.img_size[0] + 1, self.img_size[1] + 1), interp='nearest')
 
         image = T(img)
         label = segm_transform(segm)
@@ -151,7 +157,7 @@ class Woodscape_dataset(Dataset):
         ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
         radius = cartesian.norm(dim=0)
         mask = (radius > 0.0) & (radius < 1) 
-        mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (self.img_size), mode="nearest")
+        mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (self.img_size[0] + 1, self.img_size[1] + 1), mode="nearest")
         ############################################# masks ############################################################
 
         sample = {'image': image, 'label': label}
@@ -167,6 +173,7 @@ class Woodscape_dataset(Dataset):
         sample['one_hot'] = one_hot
         sample['mask'] = mask1[0].to(torch.long)
         # sample = {'image': img, 'label': segm, 'dist':dist, 'class':cls}
+        # breakpoint()
         return sample['image'], sample['label'], sample['dist'] , sample['mask'], one_hot
 
 def get_mean_std(base_dir ):
@@ -188,12 +195,12 @@ def get_mean_std(base_dir ):
 
 
 if __name__=='__main__':
-    db_train = Woodscape_dataset(base_dir="/localscratch/prongs.45335371.0/data/woodscapes", split="train")
+    db_train = Woodscape_dataset(base_dir="/localscratch/prongs.50875538.0/data_new/woodscapes", split="train")
     # trainloader = DataLoader(db_train, batch_size=8, shuffle=True, num_workers=1, pin_memory=True)
     # for i_batch, sampled_batch in enumerate(trainloader):
     #     import pdb;pdb.set_trace()
     #     print("ass")
-    mean,std= get_mean_std(base_dir="/localscratch/prongs.45335371.0/data/woodscapes")
+    # mean,std= get_mean_std(base_dir="/localscratch/prongs.45335371.0/data/woodscapes")
     m = db_train[0]
     import pdb;pdb.set_trace()
     print("ass")

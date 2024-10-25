@@ -3,8 +3,9 @@ import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-# from utils_tan import get_sample_params_from_subdiv, concentric_dic_sampling, concentric_dic_sampling_origin
-from utils_curve import get_sample_params_from_subdiv, concentric_dic_sampling_origin
+# from utils_tan import get_sample_params_from_subdiv, concentric_dic_sampling_origin
+# from utils_c import get_sample_params_from_subdiv, concentric_dic_sampling_origin
+from utils_curve_inverse import concentric_dic_sampling, DA_grid_inv
 from envmap import EnvironmentMap
 from envmap import rotation_matrix
 import torch
@@ -402,7 +403,7 @@ class FinalPatchExpand_X4(nn.Module):
         # self.m = nn.ConvTranspose2d(dim, dim, kernel_size = (4, 4), stride=(4, 4))
         # self.n = nn.ConvTranspose2d(dim, dim, kernel_size = (4, 4), stride=(4, 4))
 
-        self.m = nn.ConvTranspose2d(dim, dim, kernel_size = (k_s, k_s), stride=(k_s, k_s))
+        # self.m = nn.ConvTranspose2d(dim, dim, kernel_size = (k_s, k_s), stride=(k_s, k_s))
         self.n = nn.ConvTranspose2d(dim, dim, kernel_size = (patch_size, patch_size), stride=(patch_size, patch_size))
 
         self.output_dim = dim 
@@ -416,8 +417,8 @@ class FinalPatchExpand_X4(nn.Module):
         B, L, C = x.shape
         assert L == H * W, "input feature has wrong size"
         x = x.view(B, self.rad_cut, self.rad_cut, C).transpose(2, 3).transpose(1, 2)
-        x = self.m(self.n(x)).transpose(1, 2).transpose(2,3)
-        # x = self.n(x).transpose(1, 2).transpose(2,3)
+        # x = self.m(self.n(x)).transpose(1, 2).transpose(2,3)
+        x = self.n(x).transpose(1, 2).transpose(2,3)
         # x = x
         # x = self.expand(x)
         # B, L, C = x.shape
@@ -617,7 +618,8 @@ class PatchEmbed(nn.Module):
     def __init__(self, img_size=224, patch_size=4, n_radius = 2, in_chans=3, embed_dim=96, norm_layer=None):
         super().__init__()
         img_size = to_2tuple(img_size)
-        n_rad = n_radius
+        n_rad = 3
+        #n_radius
         # breakpoint()
         k_s = (n_rad*2)//patch_size
         # ks = int(np.sqrt(n_rad*2))
@@ -636,12 +638,11 @@ class PatchEmbed(nn.Module):
         # self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
         # self.proj1 = nn.Conv2d(in_chans, embed_dim, kernel_size=(2, 2), stride=(2, 2))
         # self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(3, 3), stride=(3, 3))
-
         # self.proj1 = nn.Conv2d(in_chans, embed_dim, kernel_size=(4, 4), stride=(4, 4))
         # self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(4, 4), stride=(4, 4))
 
         self.proj1 = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-        self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(k_s, k_s), stride=(k_s, k_s))
+        # self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(k_s, k_s), stride=(k_s, k_s))
 
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
@@ -649,18 +650,19 @@ class PatchEmbed(nn.Module):
             self.norm = None
 
     def forward(self, x, dist):
+        # breakpoint()
         B, C, H, W = x.shape
         # FIXME look at relaxing size constraints
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         dist = dist.transpose(1,0)
         # breakpoint()
-        # img = pil(x[0])
-        # img.save('og_im.png')
-        xc, yc, theta_max = concentric_dic_sampling_origin(
+        img = pil(x[0])
+        img.save('og_im_.png')
+        xc, yc = concentric_dic_sampling(
             subdiv=self.subdiv,
             img_size=self.img_size,
-            distortion_model = "spherical",
+            distortion_model = "polynomial",
             D = dist)
         # sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
         B, n_r, n_a = xc.shape
@@ -673,22 +675,26 @@ class PatchEmbed(nn.Module):
         out = torch.cat((y_, x_), dim = 3)
         out = out.cuda()
         tensor = nn.functional.grid_sample(x, out, align_corners = True)
+
+        x_inv, y_inv = DA_grid_inv(dist, self.img_size[0], 'polynomial')
+        grid_ = torch.cat((y_inv.unsqueeze(-1), x_inv.unsqueeze(-1)), dim = 3).cuda()
+
         # tensor = torch.flip(tensor, dims=[2,3])
-        # img = pil(tensor[0])
-        # img.save('og.png')
+        img = pil(tensor[0])
+        img.save('og_.png')
         # breakpoint()
         # tensor_lab = nn.functional.grid_sample(label, out, align_corners = True, mode = 'nearest')
         # tensor_lab = torch.flip(tensor_lab, dims=[2,3])
         # label = nn.functional.grid_sample(label, out, align_corners = True, mode = 'nearest')
         # img = pil(tensor[0].detach().cpu())
         # img.save('test_new_.png')
-        tensor = self.proj2((self.proj1(tensor))).flatten(2).transpose(1, 2)
-        # tensor = self.proj1(tensor).flatten(2).transpose(1, 2)
+        # tensor = self.proj2((self.proj1(tensor))).flatten(2).transpose(1, 2)
+        tensor = self.proj1(tensor).flatten(2).transpose(1, 2)
 
         # x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
         if self.norm is not None:
             x = self.norm(tensor)
-        return x
+        return x, grid_
 
     def flops(self):
         Ho, Wo = self.patches_resolution
@@ -724,13 +730,17 @@ class Radial_curve_cds(nn.Module):
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
     """
 
-    def __init__(self, img_size=224, patch_size=4, n_radius = 3, in_chans=3, num_classes=1000,
+    def __init__(self, img_size=(768, 768), patch_size=4, n_radius = 3, in_chans=3, num_classes=1000,
                  embed_dim=96, depths=[2, 2, 2, 2], depths_decoder=[1, 2, 2, 2], num_heads=[3, 6, 12, 24],
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
                  use_checkpoint=False, final_upsample="expand_first", **kwargs):
         super().__init__()
+
+        # import pdb;pdb.set_trace()
+
+        img_size = img_size[0]
 
         print("SwinTransformerSys expand initial----depths:{};depths_decoder:{};drop_path_rate:{};num_classes:{}".format(depths,
         depths_decoder,drop_path_rate,num_classes))
@@ -839,7 +849,7 @@ class Radial_curve_cds(nn.Module):
 
     #Encoder and Bottleneck
     def forward_features(self, x, dist):
-        x = self.patch_embed(x, dist)
+        x, grid_ = self.patch_embed(x, dist)
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
@@ -851,7 +861,7 @@ class Radial_curve_cds(nn.Module):
 
         x = self.norm(x)  # B L C
   
-        return x, x_downsample
+        return x, x_downsample, grid_
 
     #Dencoder and Skip connection
     def forward_up_features(self, x, x_downsample):
@@ -876,17 +886,17 @@ class Radial_curve_cds(nn.Module):
             
         return x
 
-    def forward(self, x, dist, cls):
+    def forward(self, x, dist):
+        # breakpoint()
         B, C, H, W = x.shape
         # breakpoint()
         # label = label.reshape(B, 1, H, W).to(torch.float32)
-        x, x_downsample = self.forward_features(x, dist)
+        x, x_downsample, grid_ = self.forward_features(x, dist)
         x = self.forward_up_features(x,x_downsample)
         x = self.up_x4(x)
         # breakpoint()
-        x = restruct(x, cls, 96, 128, 128)
-        # breakpoint()
         # x = self.output(x)
+        x  = nn.functional.grid_sample(x, grid_, align_corners = True)
         x = self.final(x)
         # breakpoint()
         # breakpoint()

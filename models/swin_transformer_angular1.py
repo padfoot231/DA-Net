@@ -14,7 +14,10 @@ import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils_curve import get_sample_params_from_subdiv, concentric_dic_sampling_origin
+# from utils_curve import get_sample_params_from_subdiv, concentric_dic_sampling_origin, Eliptical_mapping
+from utils_curve_inverse import concentric_dic_sampling, DA_grid_inv
+
+# from utils_c import get_sample_params_from_subdiv, concentric_dic_sampling_origin, Eliptical_mapping
 # from utils_tan import get_sample_params_from_subdiv, concentric_dic_sampling_origin
 pi = 3.141592653589793
 
@@ -115,28 +118,7 @@ def KNN(x, c, P=10, k=1, verbose=True):
         c = [c]
 
     # Function to compute k-NN on a single GPU
-    def compute_knn_on_gpu(x_chunk, c_chunk, k):
-        x_i = LazyTensor(x_chunk.view(1, x_chunk.size(0), -1, D))  # Shape: (1, N, D)
-        c_j = LazyTensor(c_chunk.view(1, P, 1, D))  # Shape: (1, P, 1, D)
-        
-        # Compute squared distances
-        D_ij = ((x_i - c_j) ** 2).sum(dim=-1)  # Shape: (1, N, P)
-        knn_indices = D_ij.argKmin(k, dim=2)  # Shape: (1, N, k)
-        
-        return knn_indices
 
-    # Perform k-NN computation on each GPU
-    knn_results = []
-    for i in range(len(x)):
-        knn_results.append(compute_knn_on_gpu(x[i], c[i], k))
-        
-    # Gather results from all GPUs
-    knn_indices = torch.cat(knn_results, dim=1)  # Shape: (B, N, k)
-
-    if verbose:
-        print(f"Computed k-NN with shape: {knn_indices.shape}")
-
-    return knn_indices
 
 def restruct(output, cls, embed_dim, H, W):
     """
@@ -340,7 +322,7 @@ class WindowAttention(nn.Module):
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
-        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w], indexing='ij'))  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
@@ -883,12 +865,13 @@ class PatchEmbed(nn.Module):
         else:
             self.norm = None
 
-    def forward(self, x, dist, lab):
+    def forward(self, x, dist):
         B, C, H, W = x.shape
 
         dist = dist.transpose(1,0)
         radius_buffer, azimuth_buffer = 0, 0
-        xc, yc, theta_max = concentric_dic_sampling_origin(
+        # breakpoint()
+        xc, yc = concentric_dic_sampling(
             subdiv=self.subdiv,
             img_size=self.img_size,
             distortion_model = self.distoriton_model,
@@ -901,17 +884,18 @@ class PatchEmbed(nn.Module):
         y_ = y_/(W//2)
         out = torch.cat((y_, x_), dim = 3)
         out = out.cuda()
-        breakpoint()
+        # breakpoint()
+        x_inv, y_inv = DA_grid_inv(dist, self.img_size[0], self.distoriton_model)
+        grid_ = torch.cat((y_inv.unsqueeze(-1), x_inv.unsqueeze(-1)), dim = 3)
 
-        tensor = nn.functional.grid_sample(x, out, align_corners = True)
-        # tensor = torch.flip(tens or, dims=[2,3])
-        # tensor = torch.flip(tensor, dims=[2,3])
-        tensor_lab = nn.functional.grid_sample(lab, out, align_corners = True)
-        # tensor = self.proj(tensor).flatten(2).transpose(1, 2)
-        # if self.norm is not None:
-        #     tensor = self.norm(tensor)
-        breakpoint()
-        return tensor, tensor_lab, theta_max
+        tensor = nn.functional.grid_sample(x, out, mode='bilinear', align_corners = True)
+        pil(tensor[0]).save('high.png')
+
+        tensor = nn.functional.interpolate(tensor, size=self.img_size, mode='bilinear', align_corners=True)
+   
+
+        # breakpoint()
+        return tensor, grid_
 
     def flops(self):
         Ho, Wo = self.patches_resolution
@@ -1071,8 +1055,8 @@ class SwinTransformerAng(nn.Module):
     # def no_weight_decay_keywords(self):
     #     return {'relative_position_bias_table'}
     
-    def forward_features(self, x, dist, lab):
-        x, x_lab, theta_max = self.patch_embed(x, dist, lab)
+    def forward_features(self, x, dist):
+        x, grid_ = self.patch_embed(x, dist)
         # if self.ape:
         #     x = x + self.absolute_pos_embed
         # x = self.pos_drop(x)
@@ -1081,7 +1065,7 @@ class SwinTransformerAng(nn.Module):
         #     x_downsample.append(x)
         #     x = layer(x, theta_max)
         # x = self.norm(x)  # B L C
-        return x, x_lab, theta_max
+        return x, grid_
 
     def forward_up_features(self, x, x_downsample, theta_max):
         for inx, layer_up in enumerate(self.layers_up):
@@ -1107,15 +1091,15 @@ class SwinTransformerAng(nn.Module):
             x = x.view(B,L, self.n_radius*self.n_azmiuth,-1)
             x = x.permute(0,3,1,2).contiguous() #B,C,H,W
         return x
-    def forward(self, x, dist, cls, lab):
-        x, x_lab, theta_max = self.forward_features(x, dist, lab)
-        breakpoint()
+    def forward(self, x, dist):
+        x, grid_ = self.forward_features(x, dist)
+        # breakpoint()
         # x = self.forward_up_features(x ,x_downsample, theta_max)
         # x = self.up_x4(x)
         # img = torch.zeros(1, 3, 128, 128)
-        img = restruct(x, cls, 3, self.img_size, self.img_size)
+        img = nn.functional.grid_sample(x, grid_, mode='bilinear', align_corners = True)
         # lab = restruct(x_lab, cls, 3, self.img_size, self.img_size)
-        return x, x_lab, img
+        return x, img
 
     def flops(self):
         flops = 0
@@ -1130,7 +1114,9 @@ if __name__=='__main__':
     from torchvision import transforms
     from PIL import Image, ImageOps
     import pickle as pkl
+    import math
 
+    
     T = transforms.ToTensor()
     pil = transforms.ToPILImage()
 
@@ -1152,42 +1138,35 @@ if __name__=='__main__':
                         ape=False,
                         patch_norm=True,
                         use_checkpoint=False,
-                        n_radius = 5,
-                        n_azimuth = 5)
+                        n_radius = 3,
+                        n_azimuth = 3)
     model = model.cuda()
     
 
     t = torch.ones(1, 3, 128, 128).float().cuda()
-    # img = Image.open('img-282.png')
+    img1 = Image.open('img-282.png')
     # label = Image.open('img-282_0.0.png')
-    img = Image.open('img-282.png')
-    label = Image.open('06555_MVR.png')
+    img = Image.open('WI.png')
+   
 
-    img1 = Image.open('04087_FV.png')
-    label1 = Image.open('06555_MVR.png')
+    # img1 = Image.open('04087_FV.png')
+   
 
     # image.save('new.png')
     # lab.save('new_lab.png')
     # breakpoint()
     img = img.resize((128, 128))
-    img.save('resize.png')
-    lab = label.resize((128, 128))
     img = T(img)
-    lab = T(lab)
-    lab = lab.unsqueeze(0).cuda()
     img = img.unsqueeze(0).cuda()
+    img = img[:, :3]
 
     img1 = img1.resize((128, 128))
     img1.save('resize.png')
-    lab1 = label1.resize((128, 128))
     img1 = T(img1)
-    lab1 = T(lab1)
-    lab1 = lab1.unsqueeze(0).cuda()
     img1 = img1.unsqueeze(0).cuda()
 
 
     im = torch.cat((img1, img), dim = 0)
-    l = torch.cat((lab, lab1), dim = 0)
     # with open('../data/text.pkl', 'rb') as f:
     #     data = pkl.load(f)
 
@@ -1196,48 +1175,23 @@ if __name__=='__main__':
     # breakpoint()
     # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
     # print('')
-    n_rad = 5
-    img_size = 128
-    with open('/home/prongs/scratch//12NN_' + str(n_rad) + '_' + str(img_size) +  '_concentric.pkl', 'rb') as f:
-        data = pkl.load(f)
-    # with open('/home/prongs/scratch/0.9.pkl', 'rb') as f:
-    #     data = pkl.load(f)
-    i = 0
-    xi = data[i][2]
-    f = data[i][1]
-    cls = data[i][0]
-    # h = 128
-    # image, f = warpToFisheye(img, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
-    # lab, f = warpToFisheye(label, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
-    dist = torch.tensor(np.array([xi, f,  3.05433]).reshape(1, 3)).float().cuda()
-    dist1 = torch.tensor(np.array([xi, f,  3.05433]).reshape(1, 3)).float().cuda()
+    # xi = 0.2
+    fov = math.radians(175)
+    dist = torch.tensor(np.array([0.9, 60.449175011552,  fov]).reshape(1, 3)).float().cuda()
+    dist1 = torch.tensor(np.array([0.9, 60.449175011552,  fov]).reshape(1, 3)).float().cuda()
     dist = torch.cat((dist, dist1), dim = 0)
-    # dist = torch.tensor(np.array([0.0, 11.17720,  3.05433]).reshape(1, 3)).float().cuda()
-    # cls = np.load('key_10t10_1.pkl.npy')
-    # cls = data[0]
+    
+
+    pol, cart = model(im, dist)
+
     # breakpoint()
-    cls1 = cls.reshape(1, cls.shape[0], cls.shape[1]).cuda()
-    cls2 = cls.reshape(1, cls.shape[0], cls.shape[1]).cuda()
-    cls = torch.cat((cls1, cls2), dim = 0)
-    breakpoint()
-    # im = im[1].reshape(1, 3, 128, 128)
-    # l = l[1].reshape(1, 3, 128, 128)
-    # dist = dist[1].reshape(1, 3)
-    # cls = cls[1].reshape(1, 16384, 12)
-    pol, pol_lab, cart = model(im, dist, cls, l)
-    pol = pil(pol[1])
-    cart = pil(cart[1])
-    pol_lab = pil(pol_lab[0])
-    # cart_lab = pil(cart_lab[0])
-    # pol_flip = ImageOps.flip(pol)
-    pol.save('polar_new1.png')
-    pol_lab.save('polar_lab_new.png')
-    # img = Image.open('04087_FV.png')
-    # img = img.resize((128, 128))
-    # img.save('296test.png')
-    breakpoint()
-    cart.save('cart_new1.png')
-    cart_lab.save('cart_lab.png')
-    breakpoint()
+    pol = pil(pol[0])
+    cart = pil(cart[0])
+    
+    pol.save('polar_new_3.png')
+
+    # breakpoint()
+    cart.save('cart_new_3.png')
+   
     print("ass")
     # import pdb;pdb.set_trace()

@@ -12,7 +12,7 @@ import random
 import argparse
 import datetime
 import numpy as np
-import wandb
+# import wandb
 import pickle as pkl
 
 import torch
@@ -43,7 +43,7 @@ from utils import load_checkpoint, load_pretrained, save_checkpoint, NativeScale
 transform = T.ToPILImage()
 data_dic = {}
 
-wandb.init(project="semantic segmantation", entity='padfoot')
+# wandb.init(project="semantic segmantation", entity='padfoot')
 # run_name = wandb.run.name
 def parse_option():
     parser = argparse.ArgumentParser('Swin Transformer training and evaluation script', add_help=False)
@@ -57,7 +57,8 @@ def parse_option():
 
     # easy config modification
     parser.add_argument('--batch-size', type=int, help="batch size for single GPU")
-    parser.add_argument('--img-size', type=int, help="image size")
+    parser.add_argument('--img_size', type=int, help="image size")
+    parser.add_argument('--img_size_wood', type=tuple, help="image size")
     parser.add_argument('--num_classes', type=int, help="number of segmentation classes")
     parser.add_argument('--data-path', type=str, help='path to dataset')
     parser.add_argument('--zip', action='store_true', help='use zipped dataset instead of folder dataset')
@@ -81,6 +82,7 @@ def parse_option():
     parser.add_argument('--throughput', action='store_true', help='Test throughput only')
     parser.add_argument('--base_lr', type=float , help="base learning rate")
     parser.add_argument('--fov', type=float, default=90.0, help="field of view")
+    parser.add_argument('--grp', type=str, default="vlow", help="group of distortion")
     parser.add_argument('--xi', type=float, default=0.0, help="distortion parameter of the image")
 
     # distributed training
@@ -192,17 +194,17 @@ def train_one_epoch(config, model, ce_loss, dice_loss, evaluator, data_loader, o
     max_iterations = config.TRAIN.EPOCHS*num_steps
     start = time.time()
     end = time.time()
-    for idx, (samples, targets, dist, cls, mask, one_hot) in enumerate(data_loader):
+    for idx, (samples, targets, dist, mask, one_hot) in enumerate(data_loader):
 
         ###############
         # breakpoint()
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
         # dist = dist.cuda(non_blocking=True)   
-        cls = cls.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
         one_hot = one_hot.cuda(non_blocking=True)
-        outputs = model(samples, dist, cls)
+        # breakpoint()
+        outputs = model(samples, dist)
         B, _, _, _ = samples.shape
         # breakpoint()
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
@@ -263,7 +265,7 @@ def train_one_epoch(config, model, ce_loss, dice_loss, evaluator, data_loader, o
                 f'grad_norm {norm_meter.val:.4f} ({norm_meter.avg:.4f})\t'
                 f'loss_scale {scaler_meter.val:.4f} ({scaler_meter.avg:.4f})\t'
                 f'mem {memory_used:.0f}MB')
-        wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val, 'lr':lr })
+        # wandb.log({"loss_train" : loss.item(), "loss_ce":loss_ce.item(), "epoch" : epoch, "grad":norm_meter.val, 'lr':lr })
 
     epoch_time = time.time() - start
     logger.info(f"EPOCH {epoch} training takes {datetime.timedelta(seconds=int(epoch_time))}")
@@ -287,17 +289,16 @@ def validate(config, ce_loss, dice_loss, evaluator, data_loader, model):
     running_loss = 0
     running_acc1 = 0
     running_acc5 = 0
-    for idx, (images, target, dist, cls, mask, one_hot) in enumerate(data_loader):
+    for idx, (images, target, dist, mask, one_hot) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         dist = dist.cuda(non_blocking=True)
-        cls = cls.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
         one_hot = one_hot.cuda(non_blocking=True)
         # compute output
         # breakpoint()
         # with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-        output = model(images, dist, cls)
+        output = model(images, dist)
         # breakpoint()
         B, _, _, _ = images.shape
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
@@ -333,6 +334,16 @@ def validate(config, ce_loss, dice_loss, evaluator, data_loader, model):
             image= images[0,...].permute(1,2,0)
             image*= torch.tensor(std).cuda()
             image+= torch.tensor(mean).cuda()
+            plt.imsave(config.OUTPUT+ '/' + str(args.fov) + '/' + str(args.xi) + '/' + 'val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
+            # + str(config.DATA.XI) + '/' +  
+            label = target[0].detach().cpu().numpy()
+            plt.imsave(config.OUTPUT+ '/' + str(args.fov) + '/' + str(args.xi) + '/' + 'val_label_{}.png'.format(idx), label.astype(np.uint8))
+            pred= output.argmax(1)[0].cpu().detach().numpy()
+            plt.imsave(config.OUTPUT+ '/' + str(args.fov) + '/' + str(args.xi) + '/' + 'val_pred_{}.png'.format(idx), pred)
+        if False:
+            image= images[0,...].permute(1,2,0)
+            image*= torch.tensor(std).cuda()
+            image+= torch.tensor(mean).cuda()
             plt.imsave(config.OUTPUT+ '/' + str(args.xi) + '/' + 'val_img_{}.png'.format(idx), np.clip(image.cpu().numpy(),0,1) )
             # + str(config.DATA.XI) + '/' +  
             label = target[0].detach().cpu().numpy()
@@ -353,8 +364,8 @@ def validate(config, ce_loss, dice_loss, evaluator, data_loader, model):
     # logger.info(f' * Acc@1 {acc1_meter.avg:.3f} Acc@5 {acc5_meter.avg:.3f}')
     # breakpoint()
     miou = evaluator.Mean_Intersection_over_Union()
-    wandb.log({"loss_val" :loss_meter.avg, 
-            "Acc1" : miou})
+    # wandb.log({"loss_val" :loss_meter.avg, 
+    #         "Acc1" : miou})
 
     return miou, loss_meter.avg
 

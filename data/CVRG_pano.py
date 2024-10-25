@@ -2,7 +2,7 @@ from envmap import EnvironmentMap
 from envmap import rotation_matrix
 import os
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
-import cv2
+# import cv2
 import random
 import numpy as np
 import torch
@@ -50,16 +50,16 @@ def load_color(filename: str) -> torch.Tensor:
     return {'color': torchvision.io.read_image(filename) / 255.0 }    
 
 #'depth' and 'exr'
-def load_depth(filename: str, max_depth: float=8.0) -> torch.Tensor:
-    depth_filename = filename.replace('.png', '.exr')
-    depth = torch.from_numpy(
-        cv2.imread(depth_filename, cv2.IMREAD_ANYDEPTH)
-    ).unsqueeze(0)
-    #NOTE: add a micro meter to allow for thresholding to extact the valid mask
-    depth[depth > max_depth] = max_depth + 1e-6 #replace inf value by max_depth #without any impact on wood 
-    return {
-        'depth': depth
-    }
+# def load_depth(filename: str, max_depth: float=8.0) -> torch.Tensor:
+#     depth_filename = filename.replace('.png', '.exr')
+#     depth = torch.from_numpy(
+#         cv2.imread(depth_filename, cv2.IMREAD_ANYDEPTH)
+#     ).unsqueeze(0)
+#     #NOTE: add a micro meter to allow for thresholding to extact the valid mask
+#     depth[depth > max_depth] = max_depth + 1e-6 #replace inf value by max_depth #without any impact on wood 
+#     return {
+#         'depth': depth
+#     }
 
 def sph2cart(az, el, r):
     x = r * np.cos(el) * np.cos(az)
@@ -289,8 +289,8 @@ class CVRG(Dataset):
             dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)  
             segm = segm.astype(np.uint8)
 
-        image = cv2.resize(image, (self.img_size,self.img_size),interpolation = cv2.INTER_LINEAR).astype(np.uint8)
-        label= cv2.resize(segm, (self.img_size,self.img_size), interpolation = cv2.INTER_NEAREST)
+        image = resize(image, (self.img_size,self.img_size), order = 1).astype(np.uint8)
+        label= resize(segm, (self.img_size,self.img_size), order = 0)
         image = T(image)
         label = segm_transform(label)
         ############################################# masks ############################################################

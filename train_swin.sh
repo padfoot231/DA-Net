@@ -10,6 +10,7 @@ python -m torch.distributed.launch \
 --data-path  $SLURM_TMPDIR/data_new/semantic2d3d \
 --fov 175.0 \
 --xi 0.0 \
---batch-size 8
+--batch-size 8 \
+--resume /home/prongs/scratch/Swin-unet-disc-sem-new/swin_new/default/ckpt_epoch_best_new.pth 
 
-# --resume /home/prongs/scratch/Swin-unet-disc/swin_new_disc/default/ckpt_epoch_1140.pth \
+# 

@@ -3,7 +3,7 @@ MODEL:
   NAME: stanford
   DROP_PATH_RATE: 0.2
   NUM_CLASSES: 14
-  NRADIUS: 3
+  NRADIUS: 1
   SWIN:
     EMBED_DIM: 96
     FINAL_UPSAMPLE: "expand_first"

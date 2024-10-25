@@ -2,9 +2,9 @@ import os
 import itertools
 import random
 from matplotlib.pyplot import title
-import imageio.v2 as imageio
+# import imageio.v2 as imageio
 import torch
-import cv2
+# import cv2
 import numpy as np
 import torch.distributed as dist
 from torch._six import inf
@@ -15,7 +15,7 @@ import torch.nn as nn
 # profiler = Profiler(interval=0.0001)
 import torch.nn.functional as F
 import torchvision.transforms as T
-import cv2
+# import cv2
 
 import SimpleITK as sitk
 from medpy import metric
@@ -73,9 +73,9 @@ import os
 import itertools
 import random
 from matplotlib.pyplot import title
-import imageio.v2 as imageio
+# import imageio.v2 as imageio
 import torch
-import cv2
+# import cv2
 import numpy as np
 import torch.distributed as dist
 from torch._six import inf
@@ -86,7 +86,7 @@ import torch.nn as nn
 # profiler = Profiler(interval=0.0001)
 import torch.nn.functional as F
 import torchvision.transforms as T
-import cv2
+# import cv2
 
 import SimpleITK as sitk
 from medpy import metric
@@ -268,12 +268,12 @@ def save_checkpoint(config, epoch, model, max_miou, miou, optimizer, lr_schedule
         torch.save(save_state, save_path)
         logger.info(f"{save_path} saved !!!")
     
-    if epoch%10 == 0:
-        print("ass")
-        save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}.pth')
-        logger.info(f"{save_path} saving......")
-        torch.save(save_state, save_path)
-        logger.info(f"{save_path} saved !!!")
+    # if epoch%10 == 0:
+    #     print("ass")
+    #     save_path = os.path.join(config.OUTPUT, f'ckpt_epoch_{epoch}.pth')
+    #     logger.info(f"{save_path} saving......")
+    #     torch.save(save_state, save_path)
+    #     logger.info(f"{save_path} saved !!!")
 
 
 def get_grad_norm(parameters, norm_type=2):
@@ -333,194 +333,194 @@ def compute_fov(f, xi, width):
 def compute_focal(fov, xi, width):
     return width / 2 * (xi + np.cos(fov/2)) / np.sin(fov/2)
 
-def distort(im, xi, f, im_size):
-    """Apply distortion to an image.
+# def distort(im, xi, f, im_size):
+#     """Apply distortion to an image.
 
-    Args:
-        im (str or np.ndarray): image or path to image
-        f (float): focal length of the camera in pixels
-        xi (float): distortion parameter following the spherical distortion model
+#     Args:
+#         im (str or np.ndarray): image or path to image
+#         f (float): focal length of the camera in pixels
+#         xi (float): distortion parameter following the spherical distortion model
 
-    Returns:
-        np.ndarray: distorted image
-    """
-    im = im.resize((384, 384), Image.ANTIALIAS)
-    # import pdb;pdb.set_trace()
-    im = np.array(im)
-    try:
-        height, width, _= im.shape
-    except:
-        im = np.stack((im, im, im), axis=2)
-        height, width, _= im.shape
+#     Returns:
+#         np.ndarray: distorted image
+#     """
+#     im = im.resize((384, 384), Image.ANTIALIAS)
+#     # import pdb;pdb.set_trace()
+#     im = np.array(im)
+#     try:
+#         height, width, _= im.shape
+#     except:
+#         im = np.stack((im, im, im), axis=2)
+#         height, width, _= im.shape
     
-    if isinstance(im, str):
-        im = imageio.imread(im)
+#     if isinstance(im, str):
+#         im = imageio.imread(im)
     
-    im = torch.tensor(im.astype(float))
+#     im = torch.tensor(im.astype(float))
 
-    height, width, _ = im.shape
+#     height, width, _ = im.shape
 
-    fov = compute_fov(f, 0, width)
-    
-
-    new_xi = xi
-    new_f = compute_focal(fov, new_xi, width)
-
+#     fov = compute_fov(f, 0, width)
     
 
-    u0 = width / 2
-    v0 = height / 2
+#     new_xi = xi
+#     new_f = compute_focal(fov, new_xi, width)
 
-    grid_x, grid_y = np.meshgrid(np.arange(0, width), np.arange(0, height))
-
-    X_Cam = (grid_x - u0) / new_f
-    Y_Cam = (grid_y - v0) / new_f
-
-    omega = (new_xi + np.sqrt(1 + (1 - new_xi**2) * (X_Cam**2 + Y_Cam**2))) / (X_Cam**2 + Y_Cam**2 + 1)
-
-    X_Sph = np.multiply(X_Cam, omega)
-    Y_Sph = np.multiply(Y_Cam, omega)
-    Z_Sph = omega - xi
-
-    X_d = X_Sph*f/Z_Sph + u0
-    Y_d = Y_Sph*f/Z_Sph + v0
-
-    im = im.permute(2,0,1).unsqueeze(0)
-
-    # change to torch grid sample format (from -1 to 1)
-    X_d = torch.tensor((X_d-width/2)/width*2)
-    Y_d = torch.tensor((Y_d-height/2)/height*2)
-
-    distorted_im = F.grid_sample(im, torch.stack((X_d, Y_d), dim=2).unsqueeze(0), mode='bilinear', padding_mode='zeros', align_corners=True)
-
-    distorted_im = distorted_im.squeeze().permute(1,2,0).numpy().astype(np.uint8)
-    img = cv2.resize(distorted_im, dsize=im_size, interpolation=cv2.INTER_CUBIC)
-    div = 384 // im_size[0]
-    if img.shape[2] > 3:
-        img = img[:, :, :3]
-    return img, new_f/div, new_xi, fov
-
-def undistort(im, f, xi):
-    """Apply undistortion to an image.
     
-    Args:
-        im (str or np.ndarray): image or path to image
-        f (float): focal length of the camera in pixels
-        xi (float): distortion parameter following the spherical distortion model
 
-    Returns:
-        np.ndarray: undistorted image
-        """
+#     u0 = width / 2
+#     v0 = height / 2
 
-    if isinstance(im, str):
-        im = imageio.imread(im)
+#     grid_x, grid_y = np.meshgrid(np.arange(0, width), np.arange(0, height))
+
+#     X_Cam = (grid_x - u0) / new_f
+#     Y_Cam = (grid_y - v0) / new_f
+
+#     omega = (new_xi + np.sqrt(1 + (1 - new_xi**2) * (X_Cam**2 + Y_Cam**2))) / (X_Cam**2 + Y_Cam**2 + 1)
+
+#     X_Sph = np.multiply(X_Cam, omega)
+#     Y_Sph = np.multiply(Y_Cam, omega)
+#     Z_Sph = omega - xi
+
+#     X_d = X_Sph*f/Z_Sph + u0
+#     Y_d = Y_Sph*f/Z_Sph + v0
+
+#     im = im.permute(2,0,1).unsqueeze(0)
+
+#     # change to torch grid sample format (from -1 to 1)
+#     X_d = torch.tensor((X_d-width/2)/width*2)
+#     Y_d = torch.tensor((Y_d-height/2)/height*2)
+
+#     distorted_im = F.grid_sample(im, torch.stack((X_d, Y_d), dim=2).unsqueeze(0), mode='bilinear', padding_mode='zeros', align_corners=True)
+
+#     distorted_im = distorted_im.squeeze().permute(1,2,0).numpy().astype(np.uint8)
+#     img = cv2.resize(distorted_im, dsize=im_size, interpolation=cv2.INTER_CUBIC)
+#     div = 384 // im_size[0]
+#     if img.shape[2] > 3:
+#         img = img[:, :, :3]
+#     return img, new_f/div, new_xi, fov
+
+# def undistort(im, f, xi):
+#     """Apply undistortion to an image.
     
-    im = torch.tensor(im.astype(float))
+#     Args:
+#         im (str or np.ndarray): image or path to image
+#         f (float): focal length of the camera in pixels
+#         xi (float): distortion parameter following the spherical distortion model
 
-    height, width, _ = im.shape
-    # import pdb;pdb.set_trace()
+#     Returns:
+#         np.ndarray: undistorted image
+#         """
 
-    fov = compute_fov(f, xi, width)
+#     if isinstance(im, str):
+#         im = imageio.imread(im)
+    
+#     im = torch.tensor(im.astype(float))
 
-    new_xi = 0
-    new_f = compute_focal(fov, new_xi, width)
-    # import pdb;pdb.set_trace()
-    # new_f = f
-    # new_xi = xi
-    # import pdb;pdb.set_trace()
-    u0 = width / 2
-    v0 = height / 2
+#     height, width, _ = im.shape
+#     # import pdb;pdb.set_trace()
 
-    grid_x, grid_y = np.meshgrid(np.arange(0, width), np.arange(0, height))
-    # grid_x, grid_y = x, y
-    # import pdb;pdb.set_trace()s
+#     fov = compute_fov(f, xi, width)
 
-    X_Cam = (grid_x - u0) / new_f
-    Y_Cam = (grid_y - v0) / new_f
+#     new_xi = 0
+#     new_f = compute_focal(fov, new_xi, width)
+#     # import pdb;pdb.set_trace()
+#     # new_f = f
+#     # new_xi = xi
+#     # import pdb;pdb.set_trace()
+#     u0 = width / 2
+#     v0 = height / 2
 
-    omega = (new_xi + np.sqrt(1 + (1 - new_xi**2) * (X_Cam**2 + Y_Cam**2))) / (X_Cam**2 + Y_Cam**2 + 1)
+#     grid_x, grid_y = np.meshgrid(np.arange(0, width), np.arange(0, height))
+#     # grid_x, grid_y = x, y
+#     # import pdb;pdb.set_trace()s
 
-    X_Sph = X_Cam * omega
-    Y_Sph = Y_Cam * omega
-    Z_Sph = omega - new_xi
+#     X_Cam = (grid_x - u0) / new_f
+#     Y_Cam = (grid_y - v0) / new_f
 
-    nx = X_Sph * f / (xi * np.sqrt(X_Sph**2 + Y_Sph**2 + Z_Sph**2) + Z_Sph) + u0
-    ny = Y_Sph * f / (xi * np.sqrt(X_Sph**2 + Y_Sph**2 + Z_Sph**2) + Z_Sph) + v0
+#     omega = (new_xi + np.sqrt(1 + (1 - new_xi**2) * (X_Cam**2 + Y_Cam**2))) / (X_Cam**2 + Y_Cam**2 + 1)
 
+#     X_Sph = X_Cam * omega
+#     Y_Sph = Y_Cam * omega
+#     Z_Sph = omega - new_xi
 
-    # import pdb;pdb.set_trace()
-    im = im.permute(2,0,1).unsqueeze(0)
-    # change to torch grid sample format (from -1 to 1)
-    nx = torch.tensor((nx-width/2)/width*2)
-    ny = torch.tensor((ny-height/2)/height*2)
+#     nx = X_Sph * f / (xi * np.sqrt(X_Sph**2 + Y_Sph**2 + Z_Sph**2) + Z_Sph) + u0
+#     ny = Y_Sph * f / (xi * np.sqrt(X_Sph**2 + Y_Sph**2 + Z_Sph**2) + Z_Sph) + v0
 
 
-    undistorted_im = F.grid_sample(im, torch.stack((nx, ny), dim=2).unsqueeze(0), mode='bilinear', padding_mode='zeros', align_corners=True)
-    return undistorted_im.squeeze().permute(1,2,0).numpy().astype(np.uint8)
+#     # import pdb;pdb.set_trace()
+#     im = im.permute(2,0,1).unsqueeze(0)
+#     # change to torch grid sample format (from -1 to 1)
+#     nx = torch.tensor((nx-width/2)/width*2)
+#     ny = torch.tensor((ny-height/2)/height*2)
+
+
+#     undistorted_im = F.grid_sample(im, torch.stack((nx, ny), dim=2).unsqueeze(0), mode='bilinear', padding_mode='zeros', align_corners=True)
+#     return undistorted_im.squeeze().permute(1,2,0).numpy().astype(np.uint8)
 
 ############ spherical distortion ##################################
 
-def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
-    """Distort an image using a fisheye distortion model
-    Args:
-        img (PIL): the image to distort
-        alpha (float): fov angle (radians)
-        D (list[float]): a list containing the k1, k2, k3 and k4 parameters
-        shift (tuple[float, float]): x and y shift (respectively)
-    Returns:
-        np.ndarray: the distorted image
-    """
+# def distort_image(img, D, shift=(0.0, 0.0)) -> np.ndarray:
+#     """Distort an image using a fisheye distortion model
+#     Args:
+#         img (PIL): the image to distort
+#         alpha (float): fov angle (radians)
+#         D (list[float]): a list containing the k1, k2, k3 and k4 parameters
+#         shift (tuple[float, float]): x and y shift (respectively)
+#     Returns:
+#         np.ndarray: the distorted image
+#     """
 
-    img = img.resize((384, 384), Image.ANTIALIAS)
-    img = np.array(img)
-    # print(img.shape)
+#     img = img.resize((384, 384), Image.ANTIALIAS)
+#     img = np.array(img)
+#     # print(img.shape)
     
-    try:
-        height, width, _= img.shape
-    except:
-        img = np.stack((img, img, img), axis=2)
-        height, width, _= img.shape
-    center = [height//2, width//2]
+#     try:
+#         height, width, _= img.shape
+#     except:
+#         img = np.stack((img, img, img), axis=2)
+#         height, width, _= img.shape
+#     center = [height//2, width//2]
 
-    # Image coordinates
-    map_x, map_y = np.mgrid[0:height, 0:width].astype(np.float32)
+#     # Image coordinates
+#     map_x, map_y = np.mgrid[0:height, 0:width].astype(np.float32)
 
-    # Center coordinate system
-    if height % 2 == 0:
-        center[0] -= 0.5
-    if width % 2 == 0:
-        center[1] -= 0.5
+#     # Center coordinate system
+#     if height % 2 == 0:
+#         center[0] -= 0.5
+#     if width % 2 == 0:
+#         center[1] -= 0.5
 
-    map_x -= center[0]
-    map_y -= center[1]
+#     map_x -= center[0]
+#     map_y -= center[1]
 
-    # (shift and) convert to polar coordinates
-    r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
-    theta = (r * (np.pi / 2)) / height
+#     # (shift and) convert to polar coordinates
+#     r = np.sqrt((map_x + shift[0])**2 + (map_y + shift[1])**2)
+#     theta = (r * (np.pi / 2)) / height
 
-    # Compute fisheye distortion with equidistant projection
-    theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
+#     # Compute fisheye distortion with equidistant projection
+#     theta_d = theta * (1 + D[0]*theta**2 + D[1]*theta**4 + D[2]*theta**6 + D[3]*theta**8)
 
-    # Scale so that image always fits the original size
-    f = map_y.max() / theta_d[int(center[0]), 0]
-    r_d = f * theta_d
+#     # Scale so that image always fits the original size
+#     f = map_y.max() / theta_d[int(center[0]), 0]
+#     r_d = f * theta_d
 
-    # Compute distorted map and rotate
-    map_xd = (r_d / r) * map_x + center[0]
-    map_yd = (r_d / r) * map_y + center[1]
+#     # Compute distorted map and rotate
+#     map_xd = (r_d / r) * map_x + center[0]
+#     map_yd = (r_d / r) * map_y + center[1]
 
-    # Distort
-    distorted_image = cv2.remap(
-        img, map_yd, map_xd,
-        interpolation=cv2.INTER_CUBIC,
-        borderMode=cv2.BORDER_CONSTANT,
-    )
+#     # Distort
+#     distorted_image = cv2.remap(
+#         img, map_yd, map_xd,
+#         interpolation=cv2.INTER_CUBIC,
+#         borderMode=cv2.BORDER_CONSTANT,
+#     )
 
-    distorted_image = Image.fromarray(distorted_image)
-    distorted_image = distorted_image.resize((128, 128), Image.ANTIALIAS)
-    rgb_im = distorted_image.convert('RGB')
+#     distorted_image = Image.fromarray(distorted_image)
+#     distorted_image = distorted_image.resize((128, 128), Image.ANTIALIAS)
+#     rgb_im = distorted_image.convert('RGB')
 
-    return rgb_im
+#     return rgb_im
 
 def distort_batch(x, alpha, D, shift=(0.0, 0.0), phi=0.0) :
     """Distort a batch of images (in-place) using a fisheye distortion model (same as distort_image but for a batch of images)

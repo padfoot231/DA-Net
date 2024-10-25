@@ -18,10 +18,13 @@ from timm.data import create_transform
 from .cached_image_folder import CachedImageFolder
 from .imagenet22k_dataset import IN22KDATASET
 from .samplers import SubsetRandomSampler
-from .Distorted_imagenet import M_distort
+# from .Distorted_imagenet import M_distort
 from .Woodsc import Woodscape_dataset, RandomGenerator
+from .Woodsc_swin import Woodscape_dataset_swin, RandomGenerator
 from .cityscapes import Cityscape_dataset
 from .stanford2d3d import Stanford
+from .stanford2d3d_cubemap import Stanford_cubemap
+from .stanford2d3d_da import Stanford_da
 from .CVRG_pano import CVRG
 
 try:
@@ -126,19 +129,19 @@ def build_dataset(is_train, config):
             ann_file = prefix + "_map_val.txt"
         dataset = IN22KDATASET(config.DATA.DATA_PATH, ann_file, transform)
         nb_classes = 21841
-    elif config.DATA.DATASET == 'distort':
-        if is_train:
-            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'train', transform = transform)
-            nb_classes = 200
-        else:
-            dataset = M_distort(config.DATA.DATA_PATH, config.MODEL.DISTORTION, config.DATA.low, config.DATA.high, task = 'val', transform = transform)
-            nb_classes = 200
     elif config.DATA.DATASET == 'Woodscapes':
         if is_train:
-            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
+            dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE_WOOD, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
             nb_classes = 10
         else:
             dataset = Woodscape_dataset(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE)
+            nb_classes = 10
+    elif config.DATA.DATASET == 'Woodscapes_swin':
+        if is_train:
+            dataset = Woodscape_dataset_swin(config.DATA.DATA_PATH, split = 'train', img_size=config.DATA.IMG_SIZE_WOOD_swin, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
+            nb_classes = 10
+        else:
+            dataset = Woodscape_dataset_swin(config.DATA.DATA_PATH, split = 'val', img_size=config.DATA.IMG_SIZE)
             nb_classes = 10
     elif config.DATA.DATASET == 'Cityscapes':
         if is_train:
@@ -156,10 +159,24 @@ def build_dataset(is_train, config):
             nb_classes =20
     elif config.DATA.DATASET == 'stanford':
         if is_train:
-            dataset = Stanford(config.DATA.DATA_PATH, split = 'train', n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
+            dataset = Stanford(config.DATA.DATA_PATH, split = 'train', grp=config.MODEL.GRP, n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
             nb_classes =14
         else:
-            dataset = Stanford(config.DATA.DATA_PATH, split = 'val', n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
+            dataset = Stanford(config.DATA.DATA_PATH, split = 'val', grp=config.MODEL.GRP, n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
+            nb_classes =14
+    elif config.DATA.DATASET == 'stanford_cubemap':
+        if is_train:
+            dataset = Stanford_cubemap(config.DATA.DATA_PATH, split = 'train', grp=config.MODEL.GRP, n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
+            nb_classes =14
+        else:
+            dataset = Stanford_cubemap(config.DATA.DATA_PATH, split = 'val', grp=config.MODEL.GRP, n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
+            nb_classes =14
+    elif config.DATA.DATASET == 'stanford_da':
+        if is_train:
+            dataset = Stanford_da(config.DATA.DATA_PATH, split = 'train', grp=config.MODEL.GRP, n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = transforms.Compose([RandomGenerator(output_size=[config.DATA.IMG_SIZE, config.DATA.IMG_SIZE])]))
+            nb_classes =14
+        else:
+            dataset = Stanford_da(config.DATA.DATA_PATH, split = 'val', grp=config.MODEL.GRP, n_rad = config.MODEL.NRADIUS, img_size=config.DATA.IMG_SIZE, xi = config.DATA.XI, fov = config.DATA.FOV, high = config.DATA.HIGH, low = config.DATA.LOW, transform = None)
             nb_classes =14
 
     else:

@@ -7,10 +7,10 @@ do
     python -m torch.distributed.launch \
     --nproc_per_node 1 \
     --master_port 12345  main.py --eval \
-    --cfg configs/swin/stanford_3.yaml \
+    --cfg configs/swin/stanford_3_darunet.yaml \
     --data-path  $SLURM_TMPDIR/data_new/semantic2d3d \
-    --resume /home/prongs/scratch/Radial-unet-stanford-recon-3-unet-test/stanford/default/ckpt_epoch_400.pth \
-    --output /home/prongs/scratch/Radial-unet-stanford-recon/ \
+    --resume /home/prongs/scratch/Unet/DarUnet_3/default/ckpt_epoch_best.pth \
+    --output /home/prongs/scratch/DarUnet_3/ \
     --fov 175.0 \
     --xi $i \
     --batch-size 4

@@ -7,7 +7,8 @@ MODEL:
     FINAL_UPSAMPLE: "expand_first"
     DEPTHS: [ 2, 2, 18, 2 ]
     NUM_HEADS: [ 3, 6, 12, 24 ]
-    WINDOW_SIZE_GRID: 4
+    WINDOW_SIZE_GRID: 8
 DATA:
   HIGH: 0.0
   LOW: 0.05
+  DATASET: Woodscapes_swin

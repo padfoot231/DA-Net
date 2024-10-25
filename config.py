@@ -28,6 +28,10 @@ _C.DATA.DATA_PATH = ''
 _C.DATA.DATASET = 'Woodscapes'
 # Input image size
 _C.DATA.IMG_SIZE = 128 ##224 
+#WOODSCAPE
+_C.DATA.IMG_SIZE_WOOD = (640, 640) ##224 
+
+_C.DATA.IMG_SIZE_WOOD_swin = (768, 640) ##224 
 # Interpolation to resize image (random, bilinear, bicubic)
 _C.DATA.INTERPOLATION = 'bicubic'
 # Use zipped dataset instead of folder dataset
@@ -43,6 +47,9 @@ _C.DATA.LOW = 0.0
 _C.DATA.HIGH = 0.05
 #field of view 
 _C.DATA.FOV = 90
+
+#DDR pretrained
+_C.DATA.DDRPRE = False
 
 #xi distortion parameter
 _C.DATA.XI = 0.0
@@ -103,6 +110,7 @@ _C.MODEL.SWIN_MLP.APE = False
 _C.MODEL.SWIN_MLP.PATCH_NORM = True
 _C.MODEL.NRADIUS = 10
 _C.MODEL.NAZIMUTH = 10
+_C.MODEL.GRP = 'vlow'
 # -----------------------------------------------------------------------------
 # Training settings
 # -----------------------------------------------------------------------------
@@ -229,6 +237,8 @@ def update_config(config, args):
 
 
     # merge from specific arguments
+    if args.grp:
+        config.MODEL.GRP = args.grp  
     if args.fov:
         config.DATA.FOV = args.fov  
     if args.xi:

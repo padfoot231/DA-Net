@@ -4,7 +4,7 @@ import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from utils_tan import get_sample_params_from_subdiv
+from utils_curve import get_sample_params_from_subdiv
 from torchvision import transforms
 from PIL import Image
 import pickle as pkl

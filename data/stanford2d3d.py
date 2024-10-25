@@ -2,7 +2,7 @@ from envmap import EnvironmentMap
 from envmap import rotation_matrix
 import os
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
-import cv2
+# import cv2
 import random
 import numpy as np
 import torch
@@ -51,16 +51,16 @@ def load_color(filename: str) -> torch.Tensor:
     return {'color': torchvision.io.read_image(filename) / 255.0 }    
 
 #'depth' and 'exr'
-def load_depth(filename: str, max_depth: float=8.0) -> torch.Tensor:
-    depth_filename = filename.replace('.png', '.exr')
-    depth = torch.from_numpy(
-        cv2.imread(depth_filename, cv2.IMREAD_ANYDEPTH)
-    ).unsqueeze(0)
-    #NOTE: add a micro meter to allow for thresholding to extact the valid mask
-    depth[depth > max_depth] = max_depth + 1e-6 #replace inf value by max_depth #without any impact on wood 
-    return {
-        'depth': depth
-    }
+# def load_depth(filename: str, max_depth: float=8.0) -> torch.Tensor:
+#     depth_filename = filename.replace('.png', '.exr')
+#     depth = torch.from_numpy(
+#         cv2.imread(depth_filename, cv2.IMREAD_ANYDEPTH)
+#     ).unsqueeze(0)
+#     #NOTE: add a micro meter to allow for thresholding to extact the valid mask
+#     depth[depth > max_depth] = max_depth + 1e-6 #replace inf value by max_depth #without any impact on wood 
+#     return {
+#         'depth': depth
+#     }
 
 def sph2cart(az, el, r):
     x = r * np.cos(el) * np.cos(az)
@@ -195,7 +195,7 @@ normalize= transforms.Normalize(
             std= std )
 #normalize = None
 class Stanford(Dataset):
-    def __init__(self, base_dir, split, n_rad,  xi=0.0, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
+    def __init__(self, base_dir, split, grp, n_rad,  xi=0.0, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
         self.fov = fov
         self.transform = transform  # using transform in torch!
         self.split = split
@@ -220,30 +220,20 @@ class Stanford(Dataset):
                 sem = pkl.load(f)
 
         elif split == 'test':
-            print('/12NN_' + str(n_rad) + '_' + str(img_size) +  '_concentric_test.pkl')
             with open(base_dir + '/test.pkl', 'rb') as f:
                 img = pkl.load(f)
+                img = img
             with open(base_dir + '/test_sem.pkl', 'rb') as f:
                 sem = pkl.load(f)
-            with open(base_dir + '/12NN_' + str(n_rad) + '_' +  str(img_size) + '_concentric_test.pkl', 'rb') as f:
-                dist = pkl.load(f)
+                sem = sem
+
             with open(base_dir + '/deg_stan.pkl', 'rb') as f:
                 deg = pkl.load(f)
                 self.deg = deg
 
-            # with open(self.data_dir + '/test_calib.pkl', 'rb') as f:
-            #     self.calib = pkl.load(f)
-        # print('/12NN_' + str(n_rad) + '_' + str(img_size) +  '_concentric .pkl')
-        if split == 'train' or split == 'val':
-            with open(base_dir + '/12NN_' + str(n_rad) + '_' + str(img_size) + '_concentric.pkl', 'rb') as f:
-                dist = pkl.load(f)
+
         self.img = img #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
         self.sem = sem
-        self.dist = dist
-
-        # if self.calib is None and os.path.exists(self.data_dir+ '/calib_gp2.pkl') :
-        #     with open(self.data_dir + '/calib_gp2.pkl', 'rb') as f:
-        #         self.calib = pkl.load(f)
 
 
     def __len__(self):
@@ -257,9 +247,6 @@ class Stanford(Dataset):
             # breakpoint()/
             img_path = self.data_dir + '/' + self.img[idx]
             sem_path = self.data_dir + '/' + self.sem[idx]
-            i = random.randint(0, len(self.dist) - 1)
-            # print(self.dist)
-            cls = self.dist[i][0]
         elif self.split == 'test':
             img_path = self.data_dir + '/' + self.img[idx]
             sem_path = self.data_dir + '/' + self.sem[idx]
@@ -271,16 +258,29 @@ class Stanford(Dataset):
         image = image.resize((1024, 512), resample = 2)
         image = np.array(image)
         image = image[80:-80]
-        image = cv2.resize(image, (704, 352),interpolation = cv2.INTER_LINEAR).astype(np.uint8)
-
+        image = Image.fromarray(image)
+        image = image.resize((704, 352), resample = 2)
+        # image.save("pano.png")
+        image = np.array(image)
+        # breakpoint()
+        # im.save("pano.png")
+        # image = resize(image, (704, 352), order = 1).astype(np.uint8)
+        # image = np.transpose(image, (1, 0, 2))
+        # im = Image.fromarray(image)
+        # im.save("pano.png")
         segm= Image.open(sem_path).convert('L')
         segm = segm.resize((1024, 512), resample = 0)
         segm = np.array(segm)
         segm = segm[80:-80]
-        segm= cv2.resize(segm, (704, 352), interpolation = cv2.INTER_NEAREST)
+        segm = Image.fromarray(segm)
+        segm = segm.resize((704, 352), resample = 0)
+        segm = np.array(segm)
+        # from matplotlib import pyplot as plt
+        # plt.imshow(segm)
+        # plt.savefig("segm.png")
+        # segm= resize(segm, (704, 352), order = 0)
         
         
-        # breakpoint()
         segm = segm.reshape(352, 704, 1)
         # mat_path= img_path.replace('png','npy')
         #cl= np.load(mat_path)
@@ -293,16 +293,17 @@ class Stanford(Dataset):
             fov=self.fov
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
-                # xi= self.xi
-                xi = self.dist[idx][2]
+
+                xi = random.uniform(0.8, 0.9)
+                # xi = 1 - xi
+                # print(xi)
                 deg = random.uniform(0, 360)
                 # print(xi, fov, deg)
             elif self.split=='test':
                 xi= self.xi
-                # print(xi)
+
                 deg = self.deg[idx]
-                # print(xi, deg)
-                cls = self.dist[xi][0]
+
 
             # print(xi, deg)
             image, f = warpToFisheye(image[:, :, :3], viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
@@ -310,26 +311,39 @@ class Stanford(Dataset):
             dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
       
             segm = segm.astype(np.uint8)
-            # print(xi, f, fov, h, deg)
-        #resizing to image_size
-        #image = resize(image,(self.img_size, self.img_size), order=1)
-        #label= resize(depth,(self.img_size, self.img_size), order=0)
-        image = cv2.resize(image, (self.img_size,self.img_size),interpolation = cv2.INTER_LINEAR).astype(np.uint8)
-        label= cv2.resize(segm, (self.img_size,self.img_size), interpolation = cv2.INTER_NEAREST)
+
+
+        image = resize(image, (self.img_size,self.img_size), order = 1).astype(np.uint8)
+        label= resize(segm, (self.img_size,self.img_size), order = 0)
+        im = Image.fromarray(image)
+
         image = T(image)
         label = segm_transform(label)
         ############################################# masks ############################################################
         res = 1024
-        cartesian = torch.cartesian_prod(
+        # breakpoint()
+        # cartesian = torch.cartesian_prod(
+        #     torch.linspace(-1, 1, res),
+        #     torch.linspace(1, -1, res)
+        # ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+
+        cartesian = torch.meshgrid(
             torch.linspace(-1, 1, res),
-            torch.linspace(1, -1, res)
-        ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+            torch.linspace(1, -1, res), indexing='ij'
+        )
+        cartesian = torch.stack((cartesian[0], cartesian[1]), dim=-1).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+        # breakpoint()
+        
+        
+        # .reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
+
         radius = cartesian.norm(dim=0)
         mask = (radius > 0.0) & (radius < 1) 
         mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (self.img_size), mode="nearest")
         ############################################# masks ############################################################
         #sample = {'image': image, 'label': label, 'path':b_path.replace('png','npy')}
         sample = {'image': image, 'label': label}
+        # print(self.transform)
         # if self.transform:
         if None:    
             sample = self.transform(sample)
@@ -341,10 +355,10 @@ class Stanford(Dataset):
         # sample['label']= sample['label']
 
         sample['dist'] = dist
-        #print(sample['dist'])x
+        # print(sample['label'].shape)
         
 
-        #sample['label']= sample['label'].squeeze(0)
+        # sample['label']= sample['label'].squeeze(0)
 
         if normalize is not None:
             sample['image']= normalize(sample['image'])
@@ -352,7 +366,7 @@ class Stanford(Dataset):
         sample['mask'] = mask1[0].to(torch.long)
 
         #print(sample.keys())
-        return sample['image'], sample['label'], sample['dist'] , cls, sample['mask'], one_hot
+        return sample['image'], sample['label'][:, :, 0], sample['dist'] , sample['mask'], one_hot[:, :, 0]
 
 def get_mean_std(base_dir ):
     db= CVRG(base_dir, split="train", transform=None)
@@ -372,9 +386,9 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/localscratch/prongs.49996212.0/data/semantic2d3d'
-    breakpoint()
-    db= Stanford(root_path, split="train", transform=None)
+    root_path= '/localscratch/prongs.50847042.0/data_new/semantic2d3d'
+    # breakpoint()
+    db= Stanford(root_path, split="train", n_rad=5, transform=None)
     
     # mean,std= get_mean_std(root_path)
     db[0]

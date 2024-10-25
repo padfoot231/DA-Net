@@ -1,0 +1,17 @@
+MODEL:
+  TYPE: ddr_net_dar
+  NAME: ddr_net_dar
+  DROP_PATH_RATE: 0.2
+  NUM_CLASSES: 14
+  NRADIUS: 3
+  SWIN:
+    EMBED_DIM: 96
+    FINAL_UPSAMPLE: "expand_first"
+    DEPTHS: [ 2, 2, 18, 2 ]
+    NUM_HEADS: [ 3, 6, 12, 24 ]
+    WINDOW_SIZE_GRID: 4
+DATA:
+  HIGH: 0.8
+  LOW: 0.93
+  FOV: 175
+  DATASET: stanford_da

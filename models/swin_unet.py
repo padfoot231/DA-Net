@@ -542,6 +542,8 @@ class PatchEmbed(nn.Module):
         # FIXME look at relaxing size constraints
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+
+        breakpoint()
         x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
         if self.norm is not None:
             x = self.norm(x)
@@ -733,7 +735,7 @@ class SwinTransformerSys(nn.Module):
             
         return x
 
-    def forward(self, x, dist, lab):
+    def forward(self, x, dist):
         x, x_downsample = self.forward_features(x)
         x = self.forward_up_features(x,x_downsample)
         x = self.up_x4(x)
