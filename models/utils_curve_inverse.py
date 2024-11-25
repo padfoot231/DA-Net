@@ -727,3 +727,135 @@ def DA_grid_inv(D, img_size, distortion_model):
     x_out, y_out = x_out.cuda(), y_out.cuda()
     
     return x_out, y_out
+
+
+
+def DA_grid_inv_(D, img_size, distortion_model):
+
+    if distortion_model == 'spherical':
+        fov = D[2][0]
+    elif distortion_model == 'polynomial':
+        fov = torch.tensor(3.31613).cuda()
+    
+    theta_d_max = fov/2
+    k = 1 / torch.tensor(3.4386)
+
+    x = torch.linspace(-1, 1, img_size)
+    y = torch.linspace(-1, 1, img_size)
+    xx, yy = torch.meshgrid(x, y)
+
+    xx, yy = xx, yy
+
+    # breakpoint()
+
+    # u_, v_ = square_to_disc(u, v)
+    xx, yy = disc_to_square(xx, yy)
+
+    # xx, yy = xx.cuda(), yy.cuda()
+
+    tolerance = 1e-8
+    x_major = torch.isclose(xx**2, yy**2, atol=tolerance) | (xx**2 > yy**2)    
+    
+    rad = torch.where(x_major, xx, yy)
+
+
+    phi = torch.atan2(yy, xx)
+    batch_size  = D.shape[1]
+    # xi = xi.reshape(xi.shape[0], 1)
+    
+    rad = rad[:-xx.shape[0]//2, xx.shape[0]//2:]
+    rad = rad.reshape(-1)
+
+    # import pdb;pdb.set_trace()
+
+    
+    fq = theta_from_radius(torch.abs(rad), theta_d_max, D, distortion_model)
+
+
+    fq = fq.reshape(batch_size, xx.shape[0]//2, xx.shape[1]//2)   
+    sq =  torch.flip(torch.flip(fq, dims=[0]), (0, 2)) #Q2
+    fh = torch.cat((sq, fq), dim=2)
+    sh = torch.flip(torch.flip(fh, [0, 1]), [0])
+    theta = torch.cat((fh, sh), dim=1)
+    # import pdb;pdb.set_trace()
+    #     import pdb;pdb.set_trace()
+    xx_ = xx.unsqueeze(0).expand(batch_size, -1, -1)
+    yy_ = yy.unsqueeze(0).expand(batch_size, -1, -1)
+    phi_ = phi.unsqueeze(0).expand(batch_size, -1, -1)
+
+    x_out = torch.where(x_major.unsqueeze(0).expand(batch_size, -1, -1), 
+                        torch.sign(xx_)*k*theta, 
+                        torch.sign(xx_)*k*theta/torch.abs(torch.tan(phi_+2*np.pi)))
+    y_out = torch.where(x_major.unsqueeze(0).expand(batch_size, -1, -1), 
+                        torch.sign(yy_)*k*theta*torch.abs(torch.tan(phi_+2*np.pi)), 
+                        torch.sign(yy_)*k*theta)
+    
+    return x_out, y_out
+
+
+def cube_inv_grid(B, basedim, dist):
+
+    h = 4*basedim
+    w = 3*basedim
+
+    fov = dist[2][0]
+    f  = dist[1]
+    xi = dist[0]
+    grid_ = torch.zeros(B, h, w, 2)
+    B = xi.shape[0]
+    for i in range(B):
+        # import pdb;pdb.set_trace()
+        f_ = f[i].cpu().numpy()
+        xi_ = xi[i].cpu().numpy()
+        grid_x, grid_y = imageCoordinates(h, w)
+        dx, dy, dz = fish2world(grid_x, grid_y, [f_,xi_, 128])
+        u, v = world2cube(dx, dy, dz)
+        grid = interpolate(h, w, torch.tensor(u), torch.tensor(v))
+        grid_[i] = grid
+    
+    return grid_
+
+def cube_inv(cube, grid):
+
+
+# Assume cube is a tensor with shape (2, 128, 128, 3)
+    # import pdb;pdb.set_trace()
+    B, C, H, W = cube.shape
+    basedim = cube.shape[-1]//2
+
+    
+
+    # Create tensors for re_cubemap and new_cube
+    re_cubemap = torch.zeros((B, C, 4*basedim, 3*basedim), dtype=cube.dtype)
+    cubemap = torch.zeros((B, C, 3*basedim, 3*basedim), dtype=cube.dtype)
+
+    # Assign cube to the center of cubemap
+    cubemap[:, :, basedim//2:-basedim//2, basedim//2:-basedim//2] = cube
+
+    # Bottom face
+    re_cubemap[:, :, 2*basedim:3*basedim, basedim:2*basedim] = cubemap[:, :, 0:basedim, basedim:2*basedim]
+
+    # Left face (flipping upside-down and left-right)
+    re_cubemap[:, :, basedim:2*basedim, 0:basedim] = torch.flip(cubemap[:, :, basedim:2*basedim, 0:basedim], dims=[2, 3])
+
+    # Back face
+    re_cubemap[:, :, 3*basedim:4*basedim, basedim:2*basedim] = cubemap[:, :, basedim:2*basedim, basedim:2*basedim]
+
+    # Right face (flipping upside-down and left-right)
+    re_cubemap[:, :, basedim:2*basedim, 2*basedim:3*basedim] = torch.flip(cubemap[:, :, basedim:2*basedim, 2*basedim:3*basedim], dims=[2, 3])
+
+    # Front face
+    re_cubemap[:, :, 0:basedim, basedim:2*basedim] = cubemap[:, :, 2*basedim:3*basedim, basedim:2*basedim]
+
+    # The re_cubemap tensor now contains the rearranged cubemap faces
+    new_cube = re_cubemap
+    # im = interpolate(new_cube[0], torch.tensor(u), torch.tensor(v))
+    breakpoint()
+    # grid_ = cube_inv_grid(B, basedim, dist)
+
+
+    interpolated_img = F.grid_sample(new_cube, grid, mode='bilinear', align_corners=True)
+
+    resized_tensor = F.interpolate(interpolated_img, size=(H, W), mode='bilinear', align_corners=True)
+
+    return resized_tensor

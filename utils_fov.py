@@ -2,7 +2,7 @@ import os
 import itertools
 import random
 from matplotlib.pyplot import title
-import imageio.v2 as imageio
+# import imageio.v2 as imageio
 import torch
 # import cv2
 import numpy as np
@@ -15,7 +15,6 @@ import torch.nn as nn
 # profiler = Profiler(interval=0.0001)
 import torch.nn.functional as F
 import torchvision.transforms as T
-from envmap import EnvironmentMap
 # import cv2
 
 import SimpleITK as sitk
@@ -264,22 +263,6 @@ def compute_focal(fov, xi, width):
     return width / 2 * (xi + np.cos(fov/2)) / np.sin(fov/2)
 
 
-def distort_batch(x, alpha, D, shift=(0.0, 0.0), phi=0.0) :
-    """Distort a batch of images (in-place) using a fisheye distortion model (same as distort_image but for a batch of images)
-    Args:
-        x (torch.Tensor): the batch to distort
-        alpha (float): fov angle (radians)
-        D (list[float]): a list containing the k1, k2, k3 and k4 parameters
-        shift (tuple[float, float]): x and y shift (respectively)
-        phi (float): the rotation angle (radians)
-    Returns:
-        torch.Tensor: the distorted batch
-    """
-    arr = x.moveaxis(1, -1).numpy()
-    for i in range(arr.shape[0]):
-        arr[i] = distort_image(arr[i], alpha, D, shift, phi)
-    return x
-
 def linspace(start, stop, num):
     """
     Creates a tensor of shape [num, *start.shape] whose values are evenly spaced from start to end, inclusive.
@@ -299,99 +282,88 @@ def linspace(start, stop, num):
     
     return out
 
-def get_inverse_distortion(num_points, D, fov, mag=1.0):
+def get_inverse_distortion(num_points, D, mag=1.0):
+    focal = lambda x: 1/(x.reshape(1, x.shape[0]).repeat_interleave(D.shape[1], 0).flatten() * (torch.outer(D[0], x**0).flatten() + torch.outer(D[1], x**1).flatten() + torch.outer(D[2], x**2).flatten() +torch.outer(D[3], x**3).flatten()))
+    fov = 1.48806
+    theta_d_max = torch.tensor(fov).reshape(1).cuda()
+    f = focal(theta_d_max).reshape(1, D.shape[1])
+    dist_func = lambda x: f* x * (D[0] * x**0 + D[1] * x**1 + D[2] * x**2 + D[3] * x**3)
+    # theta_d = torch.linspace(0, torch.tan(torch.tensor(fov)), num_points+1).reshape(1, num_points+1).repeat_interleave(D.shape[1], 0).transpose(1,0).cuda()
+    theta_d = torch.linspace(0, fov, num_points+1).reshape(1, num_points+1).repeat_interleave(D.shape[1], 0).transpose(1,0).cuda()
+    delta = float(torch.diff(theta_d, axis=0)[0][0])
+    a = np.random.uniform(0, 1)
+    err = np.random.uniform(0, delta/2)
+    if  a > 0.5:
+        err = np.random.uniform(0, delta/2)
+        theta_d = theta_d + err
+        # theta_d[-1] = torch.tan(torch.tensor(fov))
+        theta_d[-1] = torch.tensor(fov)
+    elif a < 0.5:
+        theta_d = theta_d - err
+        theta_d[0] = 0.0
+    # r_list = dist_func(torch.arctan(theta_d))
+
+    r_list = dist_func(theta_d)
+    # return r_list, torch.tan(torch.tensor(fov))
+    return r_list, fov
+
+def f(x):
+    a = 1.38
+    return a - a*torch.exp(-x)
+
+# Define a function to numerically compute the inverse of f(x, a)
+def inverse_f(y, x_init=0.0, lr=1e-2, steps=1000):
+    # Convert y and a to tensors
+    y = torch.tensor(y, dtype=torch.float32)
     
-    theta_d_max = fov/2
-    # xi = 0
-
-    m = 2.288135593220339
-    n = 5.0
-    a = theta_d_max
-    b = 8.31578947368421
-    c =  0.3333333333333333
-
-    def f(x, n, a, b):
-        return b*torch.pow(x/a, n)
-    def h(x, m, a):
-        return -torch.pow(-x/a + 1, m) + 1
-    def g(x, m, n, a, b, c):
-        return c*f(x, n, a, b) + (1-c)*h(x, m, a)
-    def g_inv(y, m, n, a, b, c):
-        test_x = torch.linspace(0, theta_d_max, 100000).cuda()
-        test_y = g(test_x, m, n, a, b, c).cuda()
-        x = torch.zeros(num_points + 1).cuda()
-        for i in range(num_points + 1):
-            lower_idx = test_y[test_y <= y[i]].argmax()
-            x[i] = test_x[lower_idx]
-        return x
-
-    def rad(D, theta):
-        focal = lambda x: 1/(x * (D[0] * x**0 + D[1] * x**1 + D[2] * x**2 + D[3] * x**3))
-        f = focal(theta_d_max).reshape(1, D.shape[1])
-        funct = g_inv(theta, m = m, n = n, a = a, b = b, c = c)
-        funct = funct.reshape(num_points + 1, 1)
-        # breakpoint()
-        radius = f*funct * (D[0] * funct**0 + D[1] * funct**1 + D[2] * funct**2 + D[3] * funct**3)
-        # radius = ((torch.cos(theta_max) + xi)/torch.sin(theta_max))*torch.sin(funct)/(torch.cos(funct) + xi)
-        return radius
-    # print("ass")
-    # theta_d_max = torch.tan(fov/2)
-    # theta_d = linspace(torch.tensor([0]).cuda(), g(theta_d_max), num_points+1).cuda()
-    theta_d = torch.linspace(0, g(theta_d_max, m = m, n = n, a = a, b = b, c = c), num_points + 1).cuda()
-
-    r_list = rad(D, theta_d)
-    # print("theta")
-    # r_lin = rad(theta_d_num)
-    # r_d = rad(theta_d_num1)
-    return r_list, theta_d_max
-
-
-def get_inverse_dist_spherical(num_points, xi, fov, new_f):
+    # Initialize x as a tensor with requires_grad=True
+    x = torch.tensor([x_init], dtype=torch.float32, requires_grad=True)
     
+    # Set up the optimizer (Adam in this case)
+    optimizer = torch.optim.Adam([x], lr=lr)
+    
+    # Perform gradient descent to minimize the difference f(x, a) - y
+    for _ in range(steps):
+        optimizer.zero_grad()
+        
+        # Compute f(x, a)
+        fx = f(x)
+        fx = fx.cuda()
+        
+        # Compute the loss as the difference between f(x, a) and y
+        # import pdb;pdb.set_trace()
+        loss = (fx - y) ** 2
+        
+        # Backpropagate to compute gradients
+        loss.backward()
+        
+        # Update x
+        optimizer.step()
+    
+    # Return the computed inverse (the value of x that makes f(x, a) close to y)
+    return x.item()
+
+
+def get_inverse_dist_spherical(num_points, xi, fov):
+
     theta_d_max = fov/2
-    # import pdb;pdb.set_trace()
-    # xi = 0
-
-    m = 2.288135593220339
-    n = 5.0
-    a = theta_d_max
-    b = 8.31578947368421
-    c =  0.3333333333333333
-
-    def f(x, n, a, b):
-        return b*torch.pow(x/a, n)
-    def h(x, m, a):
-        return -torch.pow(-x/a + 1, m) + 1
-    def g(x, m, n, a, b, c):
-        return c*f(x, n, a, b) + (1-c)*h(x, m, a)
-    def g_inv(y, m, n, a, b, c):
-        test_x = torch.linspace(0, theta_d_max, 100000)
-        test_y = g(test_x, m, n, a, b, c)
-        x = torch.zeros(num_points + 1)
-        for i in range(num_points + 1):
-            lower_idx = test_y[test_y <= y[i]].argmax()
-            x[i] = test_x[lower_idx]
-        return x
 
     def rad(xi, theta):
-        funct = g_inv(theta, m = m, n = n, a = a, b = b, c = c)
+#         funct = g_inv(theta, theta_d_max, num_points=num_points).cuda()
+        funct = f(theta).cuda()
         funct = funct.reshape(num_points + 1, 1)
         # breakpoint()
         radius = ((torch.cos(funct[-1]) + xi)/torch.sin(funct[-1]))*torch.sin(funct)/(torch.cos(funct) + xi)
         # radius = ((torch.cos(theta_max) + xi)/torch.sin(theta_max))*torch.sin(funct)/(torch.cos(funct) + xi)
         return radius
-    # print("ass")
-    # theta_d_max = torch.tan(fov/2)
-    # theta_d = linspace(torch.tensor([0]).cuda(), g(theta_d_max), num_points+1).cuda()
-    theta_d = torch.linspace(0, g(theta_d_max, m = m, n = n, a = a, b = b, c = c), num_points + 1)
 
+#     theta_d = torch.linspace(0, g(theta_d_max), num_points).cuda()
+    theta_d = torch.linspace(0, inverse_f(theta_d_max), num_points+1).cuda()
+    # print(f"The inverse of f(x) = y for y = {theta_d_max} is approximately x = {theta_d[-1]}")
     r_list = rad(xi, theta_d)
-    # print("theta")
-    # r_lin = rad(theta_d_num)
-    # r_d = rad(theta_d_num1)
-    return r_list, theta_d_max
+    return r_list, theta_d
 
-def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda(), radius_buffer=0, azimuth_buffer=0):
+def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
     """Generate the required parameters to sample every patch based on the subdivison
     Args:
         subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
@@ -409,15 +381,17 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
         fov = D[2][0]
         f  = D[1]
         xi = D[0]
-        D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
-        D_min = D_min
+        D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov)
+        D_min = D_min*max_radius
+        # breakpoint()
+        import pdb;pdb.set_trace()
     elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
         # 
         D_min, theta_max = get_inverse_distortion(subdiv[0], D, 1.0)
-        # D_min = D_min*max_radius
-    alpha = 2*torch.tensor(np.pi).cuda() / subdiv[1]
-    # import pdb;pdb.set_trace()
+        D_min = D_min*max_radius
+    # breakpoint()
     D_min = D_min[1:, :]
+    alpha = 2*torch.tensor(np.pi).cuda() / subdiv[1]
     D_min = D_min.reshape(subdiv[0], 1, D.shape[1]).repeat_interleave(subdiv[1], 1).cuda()
     phi_start = 0
     phi_end = 2*torch.tensor(np.pi)
@@ -429,10 +403,7 @@ def get_sample_params_from_subdiv(subdiv, distortion_model, img_size, D=torch.te
     phi_list_sine = torch.sin(phi_list) 
     x = D_min * phi_list_cos    # takes time the cosine and multiplication function 
     y = D_min * phi_list_sine
-    # import pdb;pdb.set_trace()
-    u = x*torch.sqrt(1- torch.pow(y, 2)/2)
-    v = y*torch.sqrt(1- torch.pow(x, 2)/2)
-    return u.transpose(1, 2).transpose(0,1), v.transpose(1, 2).transpose(0,1), theta_max
+    return x.transpose(1, 2).transpose(0,1), y.transpose(1, 2).transpose(0,1), theta_max
 
 
 def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
@@ -453,39 +424,67 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
         fov = D[2][0]
         f  = D[1]
         xi = D[0]
-        D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
+        D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov)
         D_min = D_min.transpose(0, 1)
-        # import pdb;pdb.set_trace()
         # D_min = D_min.reshape((subdiv[0], D.shape[1]))
         D_min = D_min*max_radius
-    elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
-        fov = torch.tensor(3.31613).cuda()
-        D_min, theta_max = get_inverse_distortion(subdiv[0], D, fov, 1.0)
-        D_min = D_min.transpose(0, 1)
-        D_min = D_min*max_radius
-    # import pdb;pdb.set_trace() .
+    # breakpoint()
+    # import pdb;pdb.set_trace()
+    # flip = -torch.flip(D_min[:, 1:], (0,1))
     flip = -torch.flip(D_min[:, 1:], (1, 0))
     r_ = torch.cat((torch.flip(flip, [0]), D_min[:, 1:]), axis = 1).transpose(0, 1)
+    # r_ = torch.cat((-torch.flip(D_min, (0,1))[:, :-1], D_min[:, 1:]), axis = 1).transpose(0, 1)
     # A_ = r_1.reshape(D.shape[1], width, 1).repeat_interleave(width, 2)
     # B_ = r_1.reshape(D.shape[1], 1, width).repeat_interleave(width, 1)
-    R1 = torch.linspace(0.0, 1, width)
-    R2 = torch.linspace(0.0, 1, width)
+    R1 = torch.linspace(0.0, 1, width).cuda()
+    R2 = torch.linspace(0.0, 1, width).cuda()
     a = 2*R1 - 1
     b = 2*R2 - 1
-    radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32)
-    phi = torch.zeros((D.shape[1],width, width), dtype=torch.float32)
+    radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32).cuda()
+    phi = torch.zeros((D.shape[1],width, width), dtype=torch.float32).cuda()
 
-    
+    # Create meshgrid for a and b
+    # A, B = torch.meshgrid(a, b,indexing='ij')
+
+    # Vectorized conditions
+    # for i in range(D.shape[1]):
+    #     # Create meshgrid for a and b
+    #     A_, B_ = torch.meshgrid(r_[:, i], r_[:, i], indexing='ij')
+
+    #     # Vectorized conditions
+    #     condition1 = (A == 0) & (B == 0)
+    #     condition2 = A * A > B * B
+    #     condition3 = ~condition1 & ~condition2
+
+    #     # Calculate radius and phi for condition1
+    #     radius[i, condition1] = 0
+    #     phi[i, condition1] = 0
+
+    #     # Calculate radius and phi for condition2
+    #     radius[i, condition2] = A_[condition2]
+    #     phi[i, condition2] = (np.pi / 4) * (B[condition2] / A[condition2])
+
+    #     # Calculate radius and phi for condition3 (the remaining cases)
+    #     radius[i, condition3] = B_[condition3]
+    #     phi[i, condition3] = np.pi / 2 - (np.pi / 4) * (A[condition3] / B[condition3])
+
+    # Assuming a, b, r_ are already defined tensors
+    # a = torch.rand(128)  # Replace with actual a
+    # b = torch.rand(128)  # Replace with actual b
+    # r_ = torch.rand(128, B)  # Assuming r_ is provided
+
+    # Create meshgrid for a and b
+    # breakpoint()
     B  = D.shape[1]
-    A, B_mesh = torch.meshgrid(a, b, indexing='ij')  # Shape: (H, H)
+    A, B_mesh = torch.meshgrid(a, b)  # Shape: (H, H)
 
     # Stack the meshgrid to handle the batch size in one step
     A_stack = A.unsqueeze(0).expand(B, -1, -1)  # Shape: (B, H, H)
     B_stack = B_mesh.unsqueeze(0).expand(B, -1, -1)  # Shape: (B, H, H)
 
     # Create meshgrid for r_[:, i] for each i in the batch without loop
-    A_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i], indexing='ij')[0] for i in range(B)])
-    B_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i], indexing='ij')[1] for i in range(B)])
+    A_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i])[0] for i in range(B)])
+    B_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i])[1] for i in range(B)])
 
     # Vectorized conditions across the batch
     condition1 = (A_stack == 0) & (B_stack == 0)
@@ -493,14 +492,14 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     condition3 = ~condition1 & ~condition2
 
     # Initialize radius and phi tensors
-    radius = torch.zeros((B, width, width))
-    phi = torch.zeros((B, width, width))
+    radius = torch.zeros((B, width, width)).cuda()
+    phi = torch.zeros((B, width, width)).cuda()
 
     # Calculate radius and phi for all conditions in one go across the batch
-    radius = torch.where(condition1, torch.tensor(0.0), torch.where(condition2, A_, B_))
+    radius = torch.where(condition1, torch.tensor(0.0).cuda(), torch.where(condition2, A_, B_))
     phi = torch.where(
         condition1, 
-        torch.tensor(0.0), 
+        torch.tensor(0.0).cuda(), 
         torch.where(condition2, (np.pi / 4) * (B_stack / A_stack), np.pi / 2 - (np.pi / 4) * (A_stack / B_stack))
     )
 
@@ -509,136 +508,8 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     # breakpoint()
     x = radius*torch.cos(phi)
     y = radius*torch.sin(phi)
-    return x, y
+    return x, y, theta_max
 
-
-def Eliptical_mapping(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
-    """Generate the required parameters to sample every patch based on the subdivison
-    Args:
-        subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
-                                  samples. The format is (radius_subdiv, azimuth_subdiv)
-        n_radius (int): number of radius samples
-        n_azimuth (int): number of azimuth samples
-        img_size (tuple): the size of the image
-    Returns:
-        list[dict]: the list of parameters to sample every patch
-    """
-    max_radius = min(img_size)/2
-    width = subdiv[0]*2 
-    # D_min = get_inverse_distortion(subdiv[0], D, max_radius)
-    if distortion_model == 'spherical': # in case of spherical distortion pass the 
-        fov = D[2][0]
-        f  = D[1]
-        xi = D[0]
-        D_min, theta_max = get_inverse_dist_spherical(subdiv[0], xi, fov, f)
-        D_min = D_min.transpose(0, 1)
-        # import pdb;pdb.set_trace()
-        # D_min = D_min.reshape((subdiv[0], D.shape[1]))
-        D_min = D_min
-    elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
-        fov = torch.tensor(3.31613).cuda()
-        D_min, theta_max = get_inverse_distortion(subdiv[0], D, fov, 1.0)
-        D_min = D_min.transpose(0, 1)
-        D_min = D_min
-    # import pdb;pdb.set_trace() 
-    r = D_min[:, 1:]
-    B, N = r.shape
-    size = 3 + (N - 1)*2
-    x = torch.zeros((B, size, size)).cuda()
-    y = torch.zeros((B, size, size)).cuda()
-    for i in range(N):
-        # import pdb;pdb.set_trace()
-        step = 3 + i*2
-        start = -r[:, i]
-        end = r[:, i]
-        base_linspace = torch.linspace(0, 1, step).unsqueeze(0).expand(B, -1).cuda()  # Shape: (B, steps)
-        # Scale the base linspace to the batch-specific start and end values
-        result = start.unsqueeze(1) + base_linspace * (end.unsqueeze(1) - start.unsqueeze(1))
-        
-    #     import pdb;pdb.set_trace()
-        a = torch.cat((-r[:, i].reshape(1,r[:, i].shape[0]) , r[:, i].reshape(1,r[:, i].shape[0])), dim = 0)
-    #     import pdb;pdb.set_trace()
-        steps_x = result.shape[1]  # Number of x points
-        steps_y = a.T.shape[1]  # Number of y points
-
-        # Create fixed meshgrid structure
-    #     import pdb;pdb.set_trace()
-        xx = result.unsqueeze(1).expand(B, steps_y, steps_x).type(torch.float).transpose(1, 2)  # Shape: (B, steps_y, steps_x)
-        yy = a.T.unsqueeze(2).expand(B, steps_y, steps_x).type(torch.float).transpose(1, 2)  # Shape: (B, steps_y, steps_x)
-
-        xx_ , yy_ = yy.transpose(1, 2).type(torch.float), xx.transpose(1, 2).type(torch.float)
-    #     import pdb;pdb.set_trace()
-        split = (size - step)//2
-        
-        if split ==0 :
-    #         import pdb;pdb.set_trace()
-            x[:, [0,-1],:] = xx_
-            x[:, :, [0,-1]] = xx
-            y[:, [0,-1],:] = yy_
-            y[:, :, [0,-1]] = yy
-    #         import pdb;pdb.set_trace()
-        else:
-    #         import pdb;pdb.set_trace()
-            x[:, [split,-split-1],split:-split] = xx_
-            x[:, split:-split, [split,-split-1]] = xx
-            y[:, [split,-split-1],split:-split] = yy_
-            y[:, split:-split, [split,-split-1]] = yy
-    u = x * torch.sqrt(1 - (y**2 / 2))*max_radius
-    v = y * torch.sqrt(1 - (x**2 / 2))*max_radius
-    return u, v, r
-
-def cubemap(image, n_rad, fov, xi, h, order):
-
-
-    # fov = 175
-    # xi = 0.2
-    # h = 128
-
-    img_size= h #64
-    bg= 0.3
-    f = compute_focal(np.deg2rad(fov), xi, h)
-
-
-    #here correct (not nan)
-    e = EnvironmentMap(image, format_='fisheye', dist=[f/(h/img_size),xi])
-    #breakpoint()
-    basedim= n_rad*h//2 #always make it the half of H
-    cube = e.copy().convertTo('cube',4*basedim, order=order)
-    #print(cube.data.shape)
-
-    all_cube= cube.data
-
-    all_cube[basedim//2:2*basedim+basedim//2, basedim//2 :2*basedim+basedim//2]=0 + bg
-    #test with removing the nan
-    all_cube[np.isnan(all_cube)]=0 + bg
-
-    #plt.imsave('cube.png', all_cube)
-
-    #print(np.where(np.isnan(all_cube)))
-
-    top = all_cube[0:basedim, basedim:2*basedim]
-    front = all_cube[basedim:2*basedim, basedim:2*basedim]
-    right= np.fliplr(np.flipud(all_cube[basedim:2*basedim, 2*basedim:3*basedim]))
-    back = all_cube[3*basedim:4*basedim, basedim:2*basedim] 
-    left= np.fliplr(np.flipud(all_cube[1*basedim:2*basedim, 0:basedim]))
-    bottom= all_cube[2*basedim:3*basedim, basedim:2*basedim]
-
-    cubemap= np.zeros((3*basedim,3*basedim,image.ndim))+bg
-    cubemap[0:basedim, basedim:2*basedim]= bottom
-    cubemap[basedim:2*basedim,0:basedim]= left
-    cubemap[basedim:2*basedim,basedim:2*basedim]= back
-    cubemap[basedim:2*basedim,2*basedim:3*basedim]= right
-    cubemap[2*basedim:3*basedim,basedim:2*basedim] = top
-    # print(cubemap.shape)
-    x,y= np.where(np.any(cubemap!=bg, axis=-1))
-    min_x, max_x, min_y, max_y = x.min(), x.max(), y.min(),y.max()
-    # print(min_x, min_y, max_x, max_y)
-    # plt.imsave(os.path.join(out_folder, 'before_cubemap_{}.png'.format(xi)), cubemap)
-
-    new_cubemap= cubemap[min_y:max_y+1,min_x:max_x+1]
-
-    return new_cubemap
-# print("after removing borders ", new_cubemap.shape)
 # def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
 #     """Get the optimal radius and azimuth buffers for a given subdivision
 

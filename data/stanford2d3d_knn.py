@@ -17,6 +17,10 @@ import json
 import pickle as pkl 
 from PIL import Image
 import torch.nn.functional as F
+import torch.nn as nn
+
+from utils_curve import concentric_dic_sampling_origin
+
 
 T = transforms.ToTensor()
 pil = transforms.ToPILImage()
@@ -194,34 +198,36 @@ normalize= transforms.Normalize(
             mean= mean ,
             std= std )
 #normalize = None
-class Stanford(Dataset):
-    def __init__(self, base_dir, split, grp, n_rad,  xi=0.0, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
+class Stanford_da_knn(Dataset):
+    def __init__(self, base_dir, split, grp, n_rad,  xi=0.8, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
         self.fov = fov
         self.transform = transform  # using transform in torch!
         self.split = split
         self.model= model
         self.img_size= img_size
+        self.n_rad = 5
         self.data_dir = base_dir
         self.calib = None
         self.low = low
         self.xi = xi
         self.high = high
+        self.subdiv = ((img_size*n_rad)//2, (img_size*n_rad)//2)
         
         if split == 'train':
             with open(base_dir + '/train.pkl', 'rb') as f:
                 img = pkl.load(f)
             with open(base_dir + '/train_sem.pkl', 'rb') as f:
                 sem = pkl.load(f)
-            with open(base_dir + '/12NN_3_128_el', 'rb') as f:
-                dist = pkl.load(f)
+            with open(base_dir + '/12NN_3_128_el.pkl', 'rb') as f:
+                self.cl = pkl.load(f)
 
         elif split == 'val':
             with open(base_dir + '/val.pkl', 'rb') as f:
                 img = pkl.load(f)
             with open(base_dir + '/val_sem.pkl', 'rb') as f:
                 sem = pkl.load(f)
-            with open(base_dir + '/12NN_3_128_el', 'rb') as f:
-                dist = pkl.load(f)
+            with open(base_dir + '/12NN_3_128_el.pkl', 'rb') as f:
+                self.cl = pkl.load(f)
 
         elif split == 'test':
             with open(base_dir + '/test.pkl', 'rb') as f:
@@ -230,12 +236,13 @@ class Stanford(Dataset):
             with open(base_dir + '/test_sem.pkl', 'rb') as f:
                 sem = pkl.load(f)
                 sem = sem
-            with open(base_dir + '/12NN_3_128_el_test', 'rb') as f:
-                dist = pkl.load(f)
 
             with open(base_dir + '/deg_stan.pkl', 'rb') as f:
                 deg = pkl.load(f)
                 self.deg = deg
+            with open(base_dir + '/12NN_5_128_el_test.pkl', 'rb') as f:
+                self.cl = pkl.load(f)
+
 
 
         self.img = img #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
@@ -299,15 +306,16 @@ class Stanford(Dataset):
             fov=self.fov
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
-
-                xi = random.uniform(0.8, 0.9)
-                # xi = 1 - xi
+                i = random.randint(0, len(self.img)-1)
+                cl = self.cl[i][0]
+                xi = self.cl[i][2]
                 # print(xi)
                 deg = random.uniform(0, 360)
                 # print(xi, fov, deg)
             elif self.split=='test':
                 xi= self.xi
-
+                # print(xi)
+                cl = self.cl[xi][0]
                 deg = self.deg[idx]
 
 
@@ -321,9 +329,41 @@ class Stanford(Dataset):
 
         image = resize(image, (self.img_size,self.img_size), order = 1).astype(np.uint8)
         label= resize(segm, (self.img_size,self.img_size), order = 0)
-        im = Image.fromarray(image)
 
         image = T(image)
+
+        #################################### image to DA transformation ############################################################
+
+        image = image.unsqueeze(0)
+        # pil(image[0]).save("polar_f.png")
+        dist = torch.tensor(dist).unsqueeze(-1)
+        # breakpoint()
+        xc, yc = concentric_dic_sampling_origin(
+            subdiv=self.subdiv,
+            img_size=(self.img_size, self.img_size),
+            distortion_model = "spherical",
+            D = dist)
+
+        B, n_r, n_a = xc.shape
+        x_ = xc.reshape(B, n_r, n_a, 1).float()
+        x_ = x_/(self.img_size//2)
+        y_ = yc.reshape(B, n_r, n_a, 1).float()
+        y_ = y_/(self.img_size//2)
+
+        out = torch.cat((y_, x_), dim = 3)
+        # out = out.cuda()
+        pil(image[0]).save("fish_8.png")
+        # import pdb;pdb.set_trace()
+
+        # image = nn.functional.grid_sample(image, out, align_corners = True)
+        # # print(image.shape)
+        # image = nn.functional.interpolate(image, size=(self.img_size*self.n_rad, self.img_size*self.n_rad), mode='bilinear', align_corners = True)
+        # breakpoint()
+        # pil(image[0]).save("cds_8.png")
+        # import pdb;pdb.set_trace()
+
+        #################################### image to DA transformation ############################################################
+        
         label = segm_transform(label)
         ############################################# masks ############################################################
         res = 1024
@@ -356,23 +396,31 @@ class Stanford(Dataset):
         else:
             sample['image']= image.type(torch.float32)
             sample['label']= label.type(torch.uint8)
+        
+
         one_hot = F.one_hot(sample['label'].to(torch.int64), num_classes=14).to(torch.float32)
         # sample['image']= sample['image'].permute(2,0,1)
         # sample['label']= sample['label']
-
-        sample['dist'] = dist
-        # print(sample['label'].shape)
+        # breakpoint()
         
+        # print(sample['label'].shape)
+
 
         # sample['label']= sample['label'].squeeze(0)
 
         if normalize is not None:
             sample['image']= normalize(sample['image'])
+
+        sample['image'] = nn.functional.grid_sample(sample['image'], out, align_corners = True)
+        # print(image.shape)
+        sample['image'] = nn.functional.interpolate(sample['image'], size=(self.img_size*self.n_rad, self.img_size*self.n_rad), mode='bilinear', align_corners = True)
+
         sample['one_hot'] = one_hot
         sample['mask'] = mask1[0].to(torch.long)
 
         #print(sample.keys())
-        return sample['image'], sample['label'][:, :, 0], sample['dist'] , sample['mask'], one_hot[:, :, 0]
+        # breakpoint()
+        return sample['image'][0], sample['label'][:, :, 0],  cl, sample['mask'], one_hot[:, :, 0]
 
 def get_mean_std(base_dir ):
     db= CVRG(base_dir, split="train", transform=None)
@@ -392,12 +440,12 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/localscratch/prongs.50847042.0/data_new/semantic2d3d'
+    root_path= '/localscratch/prongs.52548387.0/data_new/semantic2d3d'
     # breakpoint()
-    db= Stanford(root_path, split="train", n_rad=5, transform=None)
+    db= Stanford_da(root_path, split="test", grp="vlow", n_rad=3, transform=None)
     
     # mean,std= get_mean_std(root_path)
-    db[0]
+    db[20]
     breakpoint()
     print("end")
     

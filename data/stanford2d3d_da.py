@@ -19,7 +19,7 @@ from PIL import Image
 import torch.nn.functional as F
 import torch.nn as nn
 
-from utils_curve_inverse import concentric_dic_sampling
+from utils_curve_inverse import concentric_dic_sampling, DA_grid_inv_
 
 
 T = transforms.ToTensor()
@@ -199,12 +199,13 @@ normalize= transforms.Normalize(
             std= std )
 #normalize = None
 class Stanford_da(Dataset):
-    def __init__(self, base_dir, split, grp, n_rad,  xi=0.0, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
+    def __init__(self, base_dir, split, grp, n_rad,  xi=0.8, model= "spherical", img_size = 128, fov = 170, high=0.0, low=0.35, transform=None):
         self.fov = fov
         self.transform = transform  # using transform in torch!
         self.split = split
         self.model= model
         self.img_size= img_size
+        self.n_rad = n_rad
         self.data_dir = base_dir
         self.calib = None
         self.low = low
@@ -299,15 +300,14 @@ class Stanford_da(Dataset):
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
 
-                xi = random.uniform(0.8, 0.9)
+                xi = random.uniform(0.8, 0.95)
                 # xi = 1 - xi
-                # print(xi)
                 deg = random.uniform(0, 360)
                 # print(xi, fov, deg)
             elif self.split=='test':
                 xi= self.xi
-
                 deg = self.deg[idx]
+                # print(xi, deg)
 
 
             # print(xi, deg)
@@ -325,7 +325,6 @@ class Stanford_da(Dataset):
 
         #################################### image to DA transformation ############################################################
 
-        image = image.unsqueeze(0)
         # pil(image[0]).save("polar_f.png")
         dist = torch.tensor(dist).unsqueeze(-1)
         # breakpoint()
@@ -334,21 +333,26 @@ class Stanford_da(Dataset):
             img_size=(self.img_size, self.img_size),
             distortion_model = "spherical",
             D = dist)
-
+        # breakpoint()
         B, n_r, n_a = xc.shape
         x_ = xc.reshape(B, n_r, n_a, 1).float()
         x_ = x_/(self.img_size//2)
         y_ = yc.reshape(B, n_r, n_a, 1).float()
         y_ = y_/(self.img_size//2)
-
+        # breakpoint()
         out = torch.cat((y_, x_), dim = 3)
         # out = out.cuda()
+        # pil(image[0]).save("fish_8.png")
+        # import pdb;pdb.set_trace()
 
-        image = nn.functional.grid_sample(image, out, align_corners = True)
-        # print(image.shape)
-        image = nn.functional.interpolate(image, size=(self.img_size, self.img_size), mode='bilinear', align_corners = True)
-        # breakpoint()
-        # pil(image[0]).save("polar_.png")
+        # image = nn.functional.grid_sample(image, out, align_corners = True)
+        # # print(image.shape)
+        # image = nn.functional.interpolate(image, size=(self.img_size*self.n_rad, self.img_size*self.n_rad), mode='bilinear', align_corners = True)
+        # # breakpoint()
+        # pil(image[0]).save("cds_8.png")
+
+
+        # import pdb;pdb.set_trace()
 
         #################################### image to DA transformation ############################################################
         
@@ -387,21 +391,39 @@ class Stanford_da(Dataset):
         one_hot = F.one_hot(sample['label'].to(torch.int64), num_classes=14).to(torch.float32)
         # sample['image']= sample['image'].permute(2,0,1)
         # sample['label']= sample['label']
-
-        sample['dist'] = dist
-        # print(sample['label'].shape)
+        # breakpoint()
         
+        # print(sample['label'].shape)
+
+        ############################################################# inverse ###############################################################################################
+        x_inv, y_inv = DA_grid_inv_(dist, self.img_size, "spherical")
+        grid_ = torch.cat((y_inv.unsqueeze(-1), x_inv.unsqueeze(-1)), dim = 3)
+        # inv = nn.functional.grid_sample(image, grid_, align_corners = True)
+        # pil(inv[0]).save("inverse_8.png")
+        # breakpoint()
+        ############################################################################################################################################################
+        sample['grid'] = grid_[0]
 
         # sample['label']= sample['label'].squeeze(0)
-
+        # print(normalize)
         if normalize is not None:
             sample['image']= normalize(sample['image'])
+        # print(sample['image'].max())
+        # breakpoint()
+        sample['image'] = sample['image'].unsqueeze(0)
+
+        sample['image'] = nn.functional.grid_sample(sample['image'], out, align_corners = True)
+        # # print(image.shape)
+        sample['image'] = nn.functional.interpolate(sample['image'], size=(self.img_size*self.n_rad, self.img_size*self.n_rad), mode='bilinear', align_corners = True)
+        # # breakpoint()
+        # pil(image[0]).save("cds_8.png")
+
         sample['one_hot'] = one_hot
         sample['mask'] = mask1[0].to(torch.long)
 
         #print(sample.keys())
         # breakpoint()
-        return sample['image'][0], sample['label'][:, :, 0], sample['dist'][:, 0] , sample['mask'], one_hot[:, :, 0]
+        return sample['image'][0], sample['label'][:, :, 0],  sample['grid'], sample['mask'], one_hot[:, :, 0]
 
 def get_mean_std(base_dir ):
     db= CVRG(base_dir, split="train", transform=None)
@@ -421,12 +443,12 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/localscratch/prongs.52088418.0/data_new/semantic2d3d'
+    root_path= '/localscratch/prongs.52645748.0/data_new/semantic2d3d'
     # breakpoint()
-    db= Stanford_da(root_path, split="train", grp="vlow", n_rad=5, transform=None)
+    db= Stanford_da(root_path, split="test", grp="vlow", n_rad=3, transform=None)
     
     # mean,std= get_mean_std(root_path)
-    db[500]
+    db[20]
     breakpoint()
     print("end")
     

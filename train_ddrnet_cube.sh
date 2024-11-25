@@ -9,7 +9,8 @@ python -m torch.distributed.launch \
 --nproc_per_node 4 \
 --master_port 12346  main.py \
 --cfg configs/swin/stanford_ddrnet_cube.yaml \
---output /home/prongs/scratch/Unet \
+--output /home/prongs/scratch/Unet_resume \
+--resume /home/prongs/scratch/Unet/ddr_net_cube/default/ckpt_epoch_best.pth \
 --data-path  $SLURM_TMPDIR/data_new/semantic2d3d \
 --fov 175.0 \
 --xi 0.0 \

@@ -515,6 +515,23 @@ def disc_to_square(u, v):
     y = 0.5 * (sqrt_term3 - sqrt_term4)
     return x, y
 
+def square_to_disc_cds(x, y):
+    rad = torch.sqrt(x * x + y * y)
+    
+    u = torch.where(x * x >= y * y, torch.sign(x) * x * x / rad, torch.sign(y) * x * y / rad)
+    v = torch.where(x * x >= y * y, torch.sign(x) * x * y / rad, torch.sign(y) * y * y / rad)
+    
+    return u, v
+
+def disc_to_square_cds(u, v):
+
+    rad = torch.sqrt(u * u + v * v)
+
+    x = torch.where(u * u >= v * v, torch.sign(u) * rad, torch.sign(v) * rad*u/v)
+    y = torch.where(u * u >= v * v, torch.sign(u) * rad*v/u, torch.sign(v) * rad)
+    
+    return x, y
+
 
 
 
@@ -731,6 +748,68 @@ def DA_grid_inv(D, img_size, distortion_model):
     return x_out, y_out
 
 
+def DA_grid_inv_(D, img_size, distortion_model):
+
+    if distortion_model == 'spherical':
+        fov = D[2][0]
+    elif distortion_model == 'polynomial':
+        fov = torch.tensor(3.31613).cuda()
+    
+    theta_d_max = fov/2
+    k = 1 / torch.tensor(3.4386)
+
+    x = torch.linspace(-1, 1, img_size)
+    y = torch.linspace(-1, 1, img_size)
+    xx, yy = torch.meshgrid(x, y, indexing='ij')
+
+    xx, yy = xx, yy
+
+    # breakpoint()
+
+    # u_, v_ = square_to_disc(u, v)
+    xx, yy = disc_to_square(xx, yy)
+
+    # xx, yy = xx.cuda(), yy.cuda()
+
+    tolerance = 1e-8
+    x_major = torch.isclose(xx**2, yy**2, atol=tolerance) | (xx**2 > yy**2)    
+    
+    rad = torch.where(x_major, xx, yy)
+
+
+    phi = torch.atan2(yy, xx)
+    batch_size  = D.shape[1]
+    # xi = xi.reshape(xi.shape[0], 1)
+    
+    rad = rad[:-xx.shape[0]//2, xx.shape[0]//2:]
+    rad = rad.reshape(-1)
+
+    # import pdb;pdb.set_trace()
+
+    
+    fq = theta_from_radius(torch.abs(rad), theta_d_max, D, distortion_model)
+
+
+    fq = fq.reshape(batch_size, xx.shape[0]//2, xx.shape[1]//2)   
+    sq =  torch.flip(torch.flip(fq, dims=[0]), (0, 2)) #Q2
+    fh = torch.cat((sq, fq), dim=2)
+    sh = torch.flip(torch.flip(fh, [0, 1]), [0])
+    theta = torch.cat((fh, sh), dim=1)
+    # import pdb;pdb.set_trace()
+    #     import pdb;pdb.set_trace()
+    xx_ = xx.unsqueeze(0).expand(batch_size, -1, -1)
+    yy_ = yy.unsqueeze(0).expand(batch_size, -1, -1)
+    phi_ = phi.unsqueeze(0).expand(batch_size, -1, -1)
+
+    x_out = torch.where(x_major.unsqueeze(0).expand(batch_size, -1, -1), 
+                        torch.sign(xx_)*k*theta, 
+                        torch.sign(xx_)*k*theta/torch.abs(torch.tan(phi_+2*np.pi)))
+    y_out = torch.where(x_major.unsqueeze(0).expand(batch_size, -1, -1), 
+                        torch.sign(yy_)*k*theta*torch.abs(torch.tan(phi_+2*np.pi)), 
+                        torch.sign(yy_)*k*theta)
+    
+    return x_out, y_out
+    
 def cubemap(image, n_rad, fov, xi, h, order):
 
 
@@ -904,7 +983,7 @@ def cube_inv_grid(B, basedim, dist):
     return grid_
 
 
-def cube_inv(cube, dist):
+def cube_inv(cube, grid):
 
 
 # Assume cube is a tensor with shape (2, 128, 128, 3)
@@ -937,12 +1016,12 @@ def cube_inv(cube, dist):
     re_cubemap[:, :, 0:basedim, basedim:2*basedim] = cubemap[:, :, 2*basedim:3*basedim, basedim:2*basedim]
 
     # im = interpolate(new_cube[0], torch.tensor(u), torch.tensor(v))
-    grid_ = cube_inv_grid(B, basedim, dist)
-    grid_ = grid_.cuda()
+    # grid_ = cube_inv_grid(B, basedim, dist)
+    # grid_ = grid_.cuda()
 
     # breakpoint()
-    interpolated_img = F.grid_sample(re_cubemap, grid_, mode='bilinear', align_corners=True)
+    interpolated_img = F.grid_sample(re_cubemap, grid, mode='bilinear', align_corners=True)
 
-    resized_tensor = F.interpolate(interpolated_img, size=(H, W), mode='bilinear', align_corners=True)
+    resized_tensor = F.interpolate(interpolated_img, size=(H//3, W//3), mode='bilinear', align_corners=True)
 
     return resized_tensor

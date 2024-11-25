@@ -508,7 +508,7 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     # breakpoint()
     x = radius*torch.cos(phi)
     y = radius*torch.sin(phi)
-    return x, y, r_
+    return x, y
 
 
 def Eliptical_mapping(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):

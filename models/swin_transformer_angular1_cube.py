@@ -15,7 +15,8 @@ import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 # from utils_curve import get_sample_params_from_subdiv, concentric_dic_sampling_origin, Eliptical_mapping
-from utils_curve_inverse import concentric_dic_sampling, DA_grid_inv, DA_grid_inv_
+from utils_inverse import concentric_dic_sampling, DA_grid_inv, cube_inv
+import torch.nn.functional as F
 
 # from utils_c import get_sample_params_from_subdiv, concentric_dic_sampling_origin, Eliptical_mapping
 # from utils_tan import get_sample_params_from_subdiv, concentric_dic_sampling_origin
@@ -322,7 +323,7 @@ class WindowAttention(nn.Module):
         # get pair-wise relative position index for each token inside the window
         coords_h = torch.arange(self.window_size[0])
         coords_w = torch.arange(self.window_size[1])
-        coords = torch.stack(torch.meshgrid([coords_h, coords_w], indexing='ij'))  # 2, Wh, Ww
+        coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
@@ -869,8 +870,6 @@ class PatchEmbed(nn.Module):
         B, C, H, W = x.shape
 
         dist = dist.transpose(1,0)
-
-        breakpoint()
         radius_buffer, azimuth_buffer = 0, 0
         # breakpoint()
         xc, yc = concentric_dic_sampling(
@@ -887,14 +886,13 @@ class PatchEmbed(nn.Module):
         out = torch.cat((y_, x_), dim = 3)
         out = out.cuda()
         # breakpoint()
-        x_inv, y_inv = DA_grid_inv_(dist.cpu(), self.img_size[0], self.distoriton_model)
-        grid_ = torch.cat((y_inv.unsqueeze(-1), x_inv.unsqueeze(-1)), dim = 3)
+        x_inv, y_inv = DA_grid_inv(dist, self.img_size[0], self.distoriton_model)
+        grid_ = torch.cat((y_inv.unsqueeze(-1), x_inv.unsqueeze(-1)), dim = 3).cuda()
 
-        tensor = nn.functional.grid_sample(x, out, mode='bilinear', align_corners = True)
-        pil(x[1]).save('high.png')
-
-        tensor = nn.functional.interpolate(tensor, size=self.img_size, mode='bilinear', align_corners=True)
-   
+        tensor = nn.functional.grid_sample(x, out, align_corners = True)
+        # tensor = torch.flip(tens or, dims=[2,3])
+        # tensor = torch.flip(tensor, dims=[2,3])
+        
 
         # breakpoint()
         return tensor, grid_
@@ -1095,13 +1093,11 @@ class SwinTransformerAng(nn.Module):
         return x
     def forward(self, x, dist):
         x, grid_ = self.forward_features(x, dist)
-        # breakpoint()
+        breakpoint()
         # x = self.forward_up_features(x ,x_downsample, theta_max)
         # x = self.up_x4(x)
         # img = torch.zeros(1, 3, 128, 128)
-        grid_ = grid_.cuda()
-        # breakpoint()
-        img = nn.functional.grid_sample(x, grid_, mode='bilinear', align_corners = True)
+        img = nn.functional.grid_sample(x, grid_, align_corners = True)
         # lab = restruct(x_lab, cls, 3, self.img_size, self.img_size)
         return x, img
 
@@ -1142,69 +1138,52 @@ if __name__=='__main__':
                         ape=False,
                         patch_norm=True,
                         use_checkpoint=False,
-                        n_radius = 3,
-                        n_azimuth = 3)
+                        n_radius = 1,
+                        n_azimuth = 1)
     model = model.cuda()
     
 
     t = torch.ones(1, 3, 128, 128).float().cuda()
-    img1 = Image.open('1.png')
+    img1 = Image.open('cube1.png')
     # label = Image.open('img-282_0.0.png')
-    img = Image.open('9.png')
+    img = Image.open('cube2.png')
    
 
     # img1 = Image.open('04087_FV.png')
    
 
-    # image.save('new.png')
-    # lab.save('new_lab.png')
-    # breakpoint()
-    img = img.resize((128, 128))
+   
     img = T(img)
     img = img.unsqueeze(0).cuda()
-    img = img[:, :3]
 
-    img1 = img1.resize((128, 128))
-    img1.save('resize.png')
+
     img1 = T(img1)
     img1 = img1.unsqueeze(0).cuda()
 
-
-    im = torch.cat((img1, img), dim = 0)
-    # with open('../data/text.pkl', 'rb') as f:
-    #     data = pkl.load(f)
-
-    # dist = data[1]
-    # dist = torch.tensor(dist).reshape(1, 3).cuda()
-    # breakpoint()
-    # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    # print('')
-    # xi = 0.2
-    #xi = 0.9, 60.449175011552
-    #xi = 0.1, 9.20039753119002
-    #xi = 0.3, 22.012591901280512
-    #xi = 0.05 5.997348938667396
     fov = math.radians(175)
-    dist = torch.tensor(np.array([0.1, 9.20039753119002,  fov]).reshape(1, 3)).float().cuda()
+
+    dist = torch.tensor(np.array([0.9, 60.449175011552,  fov]).reshape(1, 3)).float().cuda()
     dist1 = torch.tensor(np.array([0.9, 60.449175011552,  fov]).reshape(1, 3)).float().cuda()
     dist = torch.cat((dist, dist1), dim = 0)
-    
+    dist = dist.transpose(1,0)
 
-    pol, cart = model(im, dist)
+    im = torch.cat((img1, img), dim = 0)
+    im = F.interpolate(im, size=[384, 384], mode='bilinear')
+    #xi  0.9, f 60.449175011552
 
-    # breakpoint()
-    pol1 = pil(pol[0])
-    cart1 = pil(cart[0])
 
-    pol2 = pil(pol[1])
-    cart2 = pil(cart[1])
-    
-    pol1.save('polar_new_1.png')
-    pol2.save('polar_new_9.png')
+    cubemap = cube_inv(im, dist)
+
+    breakpoint()
 
     # breakpoint()
-    cart1.save('cart_new_1.png')
-    cart2.save('cart_new_9.png')
+    pol = pil(cubemap[0])
+    cart = pil(cubemap[1])
+    
+    pol.save('fish1.png')
+
+    # breakpoint()
+    cart.save('fish2.png')
    
     print("ass")
     # import pdb;pdb.set_trace()

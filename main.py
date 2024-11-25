@@ -194,17 +194,17 @@ def train_one_epoch(config, model, ce_loss, dice_loss, evaluator, data_loader, o
     max_iterations = config.TRAIN.EPOCHS*num_steps
     start = time.time()
     end = time.time()
-    for idx, (samples, targets, dist, mask, one_hot) in enumerate(data_loader):
+    for idx, (samples, targets, grid, mask, one_hot) in enumerate(data_loader):
 
         ###############
         # breakpoint()
         samples = samples.cuda(non_blocking=True)
         targets = targets.cuda(non_blocking=True)
-        # dist = dist.cuda(non_blocking=True)   
+        grid = grid.cuda(non_blocking=True)   
         mask = mask.cuda(non_blocking=True)
         one_hot = one_hot.cuda(non_blocking=True)
         # breakpoint()
-        outputs = model(samples, dist)
+        outputs = model(samples, grid)
         B, _, _, _ = samples.shape
         # breakpoint()
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
@@ -289,21 +289,23 @@ def validate(config, ce_loss, dice_loss, evaluator, data_loader, model):
     running_loss = 0
     running_acc1 = 0
     running_acc5 = 0
-    for idx, (images, target, dist, mask, one_hot) in enumerate(data_loader):
+    for idx, (images, target, grid, mask, one_hot) in enumerate(data_loader):
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
-        dist = dist.cuda(non_blocking=True)
+        grid = grid.cuda(non_blocking=True)
         mask = mask.cuda(non_blocking=True)
         one_hot = one_hot.cuda(non_blocking=True)
         # compute output
         # breakpoint()
         # with torch.cuda.amp.autocast(enabled=config.AMP_ENABLE):
-        output = model(images, dist)
+        output = model(images, grid)
         # breakpoint()
         B, _, _, _ = images.shape
         one_hot = one_hot.transpose(2, 3).transpose(1, 2)
+        # import pdb;pdb.set_trace()
         output[:, :, mask[0, 0] == 0] = one_hot[:, :, mask[0, 0] == 0]
-
+        # plt.imshow(output.argmax(1)[0].cpu().numpy())
+        # plt.savefig("lab.png")
         # measure accuracy and record loss
         loss_ce = ce_loss(output, target[:].long())
         loss_dice = dice_loss(output, target, softmax=True)

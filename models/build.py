@@ -29,7 +29,8 @@ from .swin_unet_disc_label import Radial_curve_cds_lab
 from .darswin_swin_unet import DarSwin_unet
 from .unet_model import UNet
 from .unet_model_cube import UNet_cube
-from .dar_unet_model import DarUNet
+from .unet_model_da import UNet_da
+from .unet_model_da_knn import UNet_da_knn
 from .swin_unet_cube import SwinTransformerSys_Cube
 from .ddr_net_cube import DDRNet_cube
 from .ddr_net_da import DDRNet_DA
@@ -96,8 +97,10 @@ class SwinUnet(nn.Module):
             self.swin_unet = UNet(n_channels=config.MODEL.SWIN.IN_CHANS, n_classes=config.MODEL.NUM_CLASSES)
         elif model_type == 'Unet_cube':
             self.swin_unet = UNet_cube(n_channels=config.MODEL.SWIN.IN_CHANS, n_classes=config.MODEL.NUM_CLASSES)
-        elif model_type == 'DarUnet':
-            self.swin_unet = DarUNet(n_rad=config.MODEL.NRADIUS, n_channels=config.MODEL.SWIN.IN_CHANS, n_classes=config.MODEL.NUM_CLASSES)
+        elif model_type == 'Unet_dar':
+            self.swin_unet = UNet_da(n_channels=config.MODEL.SWIN.IN_CHANS, n_classes=config.MODEL.NUM_CLASSES)
+        elif model_type == 'Unet_dar_knn':
+            self.swin_unet = UNet_da_knn(n_channels=config.MODEL.SWIN.IN_CHANS, n_classes=config.MODEL.NUM_CLASSES)
         elif model_type == 'swin_unet_disc_label':
             self.swin_unet = Radial_curve_cds_lab(img_size=config.DATA.IMG_SIZE,
                         patch_size=config.MODEL.SWIN.PATCH_SIZE,

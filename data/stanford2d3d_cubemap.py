@@ -17,7 +17,8 @@ import json
 import pickle as pkl 
 from PIL import Image
 import torch.nn.functional as F
-from utils_curve_inverse import cubemap
+from utils_curve_inverse import cubemap, cube_inv_grid
+import torch.nn as nn
 
 T = transforms.ToTensor()
 pil = transforms.ToPILImage()
@@ -303,8 +304,7 @@ class Stanford_cubemap(Dataset):
             if self.split=='train' or self.split=='val':
     
                 xi = random.uniform(0.8, 0.9)
-                # xi = 1 - xi
-                # print(xi)
+                # xi = 1 - xi                # print(xi)
                 deg = random.uniform(0, 360)
                 # print(xi, fov, deg)
             elif self.split=='test':
@@ -318,10 +318,6 @@ class Stanford_cubemap(Dataset):
             dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
       
             segm = segm.astype(np.uint8)
-            # print(xi, f, fov, h, deg)
-        #resizing to image_size
-        #image = resize(image,(self.img_size, self.img_size), order=1)
-        #label= resize(depth,(self.img_size, self.img_size), order=0)
         # breakpoint()
         # Image.fromarray((image).astype(np.uint8)).save("fish_high.png")
         image = resize(image, (self.img_size,self.img_size), order = 1).astype(np.uint8)
@@ -330,7 +326,11 @@ class Stanford_cubemap(Dataset):
         # print(image.shape, "before")
         # Image.fromarray((image).astype(np.uint8)).save("cube_high.png")
         # breakpoint()
-        image = resize(image, (self.img_size,self.img_size), order = 1).astype(np.uint8)
+        #######image resize ###########
+        image = resize(image, (self.img_size*self.n_rad,self.img_size*self.n_rad), order = 1).astype(np.uint8)
+
+        #######image resize ###########
+        
         # print(image.shape, "after")
         # Image.fromarray((image).astype(np.uint8)).save("cube_low.png")
 
@@ -380,7 +380,11 @@ class Stanford_cubemap(Dataset):
         # sample['image']= sample['image'].permute(2,0,1)
         # sample['label']= sample['label']
 
-        sample['dist'] = dist
+        
+        # breakpoint()
+        grid_ = cube_inv_grid(1, self.img_size//2, dist = torch.tensor(dist).unsqueeze(-1))
+
+        sample['grid'] = grid_[0]
         # print(sample['label'].shape)
         
 
@@ -392,7 +396,7 @@ class Stanford_cubemap(Dataset):
         sample['mask'] = mask1[0].to(torch.long)
 
         #print(sample.keys())
-        return sample['image'], sample['label'][:, :, 0], sample['dist'] , sample['mask'], one_hot[:, :, 0]
+        return sample['image'], sample['label'][:, :, 0], sample['grid'] , sample['mask'], one_hot[:, :, 0]
 
 def get_mean_std(base_dir ):
     db= CVRG(base_dir, split="train", transform=None)
@@ -412,9 +416,9 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/localscratch/prongs.52073119.0/data_new/semantic2d3d'
+    root_path= '/localscratch/prongs.52559162.0/data_new/semantic2d3d'
     # breakpoint()
-    db= Stanford_cubemap(root_path, split="train", grp="vlow", n_rad=3, transform=None)
+    db= Stanford_cubemap(root_path, split="val", grp="vlow", n_rad=3, transform=None)
     
     # mean,std= get_mean_std(root_path)
     db[0]

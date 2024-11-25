@@ -16,7 +16,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 # import cv2
-
 from numpy import logical_and as land, logical_or as lor
 
 
@@ -27,6 +26,7 @@ import torch
 
 from envmap import EnvironmentMap
 from envmap import rotation_matrix
+
 # grid_size = 128
 
 
@@ -297,22 +297,40 @@ def h(x, m=2.288135593220339, a=3.48):
     return -torch.pow(-x/a + 1, m) + 1
 def g(x, m=2.288135593220339, n= 5.0, a=3.48, b=8.31578947368421, c=0.3333333333333333):
     return c*f(x, a = a) + (1-c)*h(x, a=a)
+# def g_inv(y, theta_d_max):
+#     # Create test_x values
+#     test_x = torch.linspace(0, theta_d_max, 100000)
+#     test_y = g(test_x, a=theta_d_max)
+    
+#     # Expand dimensions to allow broadcasting for batch processing
+#     y_expanded = y.unsqueeze(-1)  # Shape: (batch_size, num_points, 1)
+#     test_y_expanded = test_y.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, 100000)
+    
+#     # Find indices where test_y is just below y
+#     diff = test_y_expanded - y_expanded  # Shape: (batch_size, num_points, 100000)
+#     lower_idx = (diff <= 0).sum(dim=-1) - 1  # Find the last index where test_y <= y
+#     lower_idx = torch.clamp(lower_idx, min=0)  # Ensure no negative indices
+    
+#     # Get the corresponding values of test_x for each index in the batch
+#     x = test_x[lower_idx]  # Shape: (batch_size, num_points)
+#     return x
+
 def g_inv(y, theta_d_max):
     # Create test_x values
-    test_x = torch.linspace(0, theta_d_max, 100000).cuda()
-    test_y = g(test_x, a=theta_d_max).cuda()
-    
-    # Expand dimensions to allow broadcasting for batch processing
-    y_expanded = y.unsqueeze(-1)  # Shape: (batch_size, num_points, 1)
-    test_y_expanded = test_y.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, 100000)
-    
-    # Find indices where test_y is just below y
-    diff = test_y_expanded - y_expanded  # Shape: (batch_size, num_points, 100000)
-    lower_idx = (diff <= 0).sum(dim=-1) - 1  # Find the last index where test_y <= y
-    lower_idx = torch.clamp(lower_idx, min=0)  # Ensure no negative indices
-    
-    # Get the corresponding values of test_x for each index in the batch
-    x = test_x[lower_idx]  # Shape: (batch_size, num_points)
+    test_x = torch.linspace(0, theta_d_max, 1000)  # Reduced number of points
+    test_y = g(test_x, a=theta_d_max)
+
+    # Use torch.searchsorted for efficient binary search
+    indices = torch.searchsorted(test_y, y, right=True)  # Find insertion points
+    indices = torch.clamp(indices, 1, test_x.size(0) - 1)  # Clamp to valid index range
+
+    # Get the two closest points around each y value for interpolation
+    x0, x1 = test_x[indices - 1], test_x[indices]
+    y0, y1 = test_y[indices - 1], test_y[indices]
+
+    # Linear interpolation
+    x = x0 + (y - y0) * (x1 - x0) / (y1 - y0)
+
     return x
 
 
@@ -324,7 +342,6 @@ def polynomial_distoriton(num_points, D, fov, mag=1.0):
         funct = g_inv(theta, theta_d_max)
         # funct = funct.reshape(num_points + 1, 1)
         funct = funct.reshape(1, num_points + 1)
-        import pdb;pdb.set_trace()
         # radius = f*funct * (D[0] * funct**0 + D[1] * funct**1 + D[2] * funct**2 + D[3] * funct**3)
         funct_expanded = funct.expand(2, 65)  # shape (2, 65)
 
@@ -340,8 +357,7 @@ def polynomial_distoriton(num_points, D, fov, mag=1.0):
         return radius
     # print("ass")
     # theta_d_max = torch.tan(fov/2)
-    # theta_d = linspace(torch.tensor([0]).cuda(), g(theta_d_max), num_points+1).cuda()
-    theta_d = torch.linspace(0, g(theta_d_max, a=theta_d_max), num_points + 1).cuda()
+    theta_d = torch.linspace(0, g(theta_d_max, a=theta_d_max), num_points + 1)
 
     r_list = rad(D, theta_d)
 
@@ -353,7 +369,8 @@ def spherical_distoriton(num_points, xi, fov, new_f):
 
     def rad(xi, theta):
         
-        k_d = ((torch.cos(theta_d_max) + xi)/torch.sin(theta_d_max)).cuda()
+        # k_d = ((torch.cos(torch.tensor(theta_d_max)) + xi)/torch.sin(torch.tensor(theta_d_max)))
+        k_d = ((torch.cos(theta_d_max) + xi)/torch.sin(theta_d_max))
         num_points = theta.shape[1]
         # print(num_points)
         funct = g_inv(theta, theta_d_max)
@@ -363,8 +380,7 @@ def spherical_distoriton(num_points, xi, fov, new_f):
         return radius
     # print("ass")
     # theta_d_max = torch.tan(fov/2)
-    # theta_d = linspace(torch.tensor([0]).cuda(), g(theta_d_max), num_points+1).cuda()
-    theta_d = torch.linspace(0, g(theta_d_max, a=theta_d_max), num_points + 1).reshape(1, num_points + 1).cuda()
+    theta_d = torch.linspace(0, g(theta_d_max, a=theta_d_max), num_points + 1).reshape(1, num_points + 1)
     # import pdb;pdb.set_trace()
     xi = xi.reshape(xi.shape[0], 1)
     r_list = rad(xi, theta_d)
@@ -375,7 +391,7 @@ def spherical_distoriton(num_points, xi, fov, new_f):
 
 
 
-def concentric_dic_sampling(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1)).cuda()):
+def concentric_dic_sampling(subdiv, distortion_model, img_size, D=torch.tensor(np.array([0.5, 0.5, 0.5, 0.5]).reshape(4,1))):
     """Generate the required parameters to sample every patch based on the subdivison
     Args:
         subdiv (tuple[int, int]): the number of subdivisions for which we need to create the 
@@ -400,12 +416,12 @@ def concentric_dic_sampling(subdiv, distortion_model, img_size, D=torch.tensor(n
         # D_min = D_min.reshape((subdiv[0], D.shape[1]))
         D_min = D_min
     elif distortion_model == 'polynomial' or distortion_model == 'polynomial_woodsc':
-        fov = torch.tensor(3.31613).cuda()
+        fov = torch.tensor(3.31613)
         D_min = polynomial_distoriton(subdiv[0], D, fov, 1.0)
         # D_min = D_min.transpose(0, 1)
         D_min = D_min
       # profiler.print()
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
     u, v = DA_grid(D_min, img_size)
 
     return u*max_radius, v*max_radius
@@ -416,8 +432,7 @@ def DA_grid(Dmin, grid_size):
     grid_size = grid_size[0] + 1
     x = torch.linspace(-1, 1, grid_size)
     y = torch.linspace(-1, 1, grid_size)
-    xx, yy = torch.meshgrid(x, y)
-    xx, yy = xx.cuda(), yy.cuda()
+    xx, yy = torch.meshgrid(x, y, indexing='ij')
     phi = torch.atan2(yy, xx)
     tolerance = 1e-8
 
@@ -440,7 +455,7 @@ def DA_grid(Dmin, grid_size):
     j_dist = torch.abs(j - center)
 
     # Create the output grid for the batch, ensure it's a float tensor to match theta's dtype
-    rad_fin = torch.zeros(batch_size, grid_size, grid_size, dtype=torch.float32).cuda()
+    rad_fin = torch.zeros(batch_size, grid_size, grid_size, dtype=torch.float32)
 
     # Condition for the major axis
     condition = (i_dist**2 > j_dist**2)
@@ -448,7 +463,7 @@ def DA_grid(Dmin, grid_size):
     # import pdb;pdb.set_trace()
 
     # Assign values from `theta` based on the condition
-    batch_indices = torch.arange(batch_size).unsqueeze(1).unsqueeze(2).cuda()
+    batch_indices = torch.arange(batch_size).unsqueeze(1).unsqueeze(2)
     rad_fin[condition] = Dmin[batch_indices.expand_as(i_dist), i_dist.long()][condition]
     rad_fin[~condition] = Dmin[batch_indices.expand_as(j_dist), j_dist.long()][~condition]
     # import pdb;pdb.set_trace()
@@ -512,7 +527,6 @@ def theta_from_radius(radius, theta_d_max, xi):
 
     def rad(xi, theta):
         
-        # k_d = ((torch.cos(torch.tensor(theta_d_max)) + xi)/torch.sin(torch.tensor(theta_d_max))).cuda()
         num_points = theta.shape[1]
         # print(num_points)
         funct = g_inv(theta, theta_d_max)
@@ -524,19 +538,19 @@ def theta_from_radius(radius, theta_d_max, xi):
     B, _ = xi.shape
 
     
-    theta_values = torch.linspace(0, g(theta_d_max, a=theta_d_max), num_points).cuda()
+    theta_values = torch.linspace(0, g(theta_d_max, a=theta_d_max), num_points)
     theta_values = theta_values.unsqueeze(0)
     
 
     
-    radius_values = rad(xi, theta_values).cuda()  ## (5, 1)
+    radius_values = rad(xi, theta_values)  ## (5, 1)
 #     radius_values = torch.cat((radius_values, radius_values), dim=1)
-    radius = radius.unsqueeze(0).cuda() 
+    radius = radius.unsqueeze(0)
 #     radius = radius[9//2:-9//2+1, 9//2:]  ## (1, 5)
     
 #     radius = torch.cat((radius, radius), dim=0)
 #     import pdb;pdb.set_trace()
-    theta_ = torch.zeros(B, num_points).cuda()
+    theta_ = torch.zeros(B, num_points)
     for i in range(B):
         lower_indices = (radius_values[i].unsqueeze(1).unsqueeze(1) <= radius.unsqueeze(0)).sum(dim=0) - 1
 
@@ -556,14 +570,13 @@ def DA_grid_inv(D, img_size):
 
     x = torch.linspace(-1, 1, img_size)
     y = torch.linspace(-1, 1, img_size)
-    xx, yy = torch.meshgrid(x, y)
+    xx, yy = torch.meshgrid(x, y, indexing='ij')
 
     xx, yy = xx, yy
 
     # u_, v_ = square_to_disc(u, v)
     xx, yy = disc_to_square(xx, yy)
 
-    xx, yy = xx.cuda(), yy.cuda()
 
     tolerance = 1e-8
     x_major = torch.isclose(xx**2, yy**2, atol=tolerance) | (xx**2 > yy**2)    
@@ -572,8 +585,8 @@ def DA_grid_inv(D, img_size):
 
 
     phi = torch.atan2(yy, xx)
-    # import pdb;pdb.set_trace()
-#     rad = rad.view(-1)
+
+
     batch_size  = xi.shape[0]
     xi = xi.reshape(xi.shape[0], 1)
     
@@ -597,21 +610,11 @@ def DA_grid_inv(D, img_size):
     y_out = torch.where(x_major.unsqueeze(0).expand(batch_size, -1, -1), 
                         torch.sign(yy_)*k*theta*torch.abs(torch.tan(phi_+2*np.pi)), 
                         torch.sign(yy_)*k*theta)
-#     x_out[zero_mask] = 0
-#     y_out[zero_mask] = 0
-#     import pdb;pdb.set_trace()
-#     import torch
-    
     
     return x_out, y_out
 
 
 def fish2world(u,v, dist):
-
-    #f= 160.18708016904978
-    #xi= 0.95
-    #u = u * 2 - 1
-    #v = v * 2 - 1
 
     f, xi, H = dist
 
@@ -763,15 +766,13 @@ def cube_inv(cube, dist):
     # Front face
     re_cubemap[:, :, 0:basedim, basedim:2*basedim] = cubemap[:, :, 2*basedim:3*basedim, basedim:2*basedim]
 
-    # The re_cubemap tensor now contains the rearranged cubemap faces
-    new_cube = re_cubemap
     # im = interpolate(new_cube[0], torch.tensor(u), torch.tensor(v))
-    breakpoint()
-    grid_ = cube_inv_grid(B, 64, dist)
+    grid_ = cube_inv_grid(B, basedim, dist)
+    grid_ = grid_.cuda()
 
+    # breakpoint()
+    interpolated_img = F.grid_sample(re_cubemap, grid_, mode='bilinear', align_corners=True)
 
-    interpolated_img = F.grid_sample(new_cube, grid_, mode='bilinear', align_corners=True)
-
-    resized_tensor = F.interpolate(interpolated_img, size=(H//3, W//3), mode='bilinear', align_corners=True)
+    resized_tensor = F.interpolate(interpolated_img, size=(H, W), mode='bilinear', align_corners=True)
 
     return resized_tensor

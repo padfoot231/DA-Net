@@ -16,6 +16,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 # import cv2
+from envmap import EnvironmentMap
+from numpy import logical_and as land, logical_or as lor
 
 import SimpleITK as sitk
 from medpy import metric
@@ -512,6 +514,23 @@ def disc_to_square(u, v):
     y = 0.5 * (sqrt_term3 - sqrt_term4)
     return x, y
 
+def square_to_disc_cds(x, y):
+    rad = torch.sqrt(x * x + y * y)
+    
+    u = torch.where(x * x >= y * y, torch.sign(x) * x * x / rad, torch.sign(y) * x * y / rad)
+    v = torch.where(x * x >= y * y, torch.sign(x) * x * y / rad, torch.sign(y) * y * y / rad)
+    
+    return u, v
+
+def disc_to_square_cds(u, v):
+
+    rad = torch.sqrt(u * u + v * v)
+
+    x = torch.where(u * u >= v * v, torch.sign(u) * rad, torch.sign(v) * rad*u/v)
+    y = torch.where(u * u >= v * v, torch.sign(u) * rad*v/u, torch.sign(v) * rad)
+    
+    return x, y
+
 
 
 
@@ -673,6 +692,7 @@ def DA_grid_inv(D, img_size, distortion_model):
     # im[:, 3:-4, 4:]
     rad = rad.reshape(-1)
     # rad = torch.cat((torch.tensor([0]).cuda(), rad), dim=0)
+    # breakpoint()
     rad[0] = 0
 
     
@@ -726,3 +746,290 @@ def DA_grid_inv(D, img_size, distortion_model):
     x_out, y_out = x_out.cuda(), y_out.cuda()
     
     return x_out, y_out
+
+def DA_grid_inv_(D, img_size, distortion_model):
+
+    if distortion_model == 'spherical':
+        fov = D[2][0]
+    elif distortion_model == 'polynomial':
+        fov = torch.tensor(3.31613).cuda()
+    
+    theta_d_max = fov/2
+    k = 1 / torch.tensor(3.4386)
+
+    x = torch.linspace(-1, 1, img_size)
+    y = torch.linspace(-1, 1, img_size)
+    xx, yy = torch.meshgrid(x, y)
+
+    xx, yy = xx, yy
+
+    # breakpoint()
+
+    # u_, v_ = square_to_disc(u, v)
+    xx, yy = disc_to_square(xx, yy)
+
+    # xx, yy = xx.cuda(), yy.cuda()
+
+    tolerance = 1e-8
+    x_major = torch.isclose(xx**2, yy**2, atol=tolerance) | (xx**2 > yy**2)    
+    
+    rad = torch.where(x_major, xx, yy)
+
+
+    phi = torch.atan2(yy, xx)
+    batch_size  = D.shape[1]
+    # xi = xi.reshape(xi.shape[0], 1)
+    
+    rad = rad[:-xx.shape[0]//2, xx.shape[0]//2:]
+    rad = rad.reshape(-1)
+
+    # import pdb;pdb.set_trace()
+
+    
+    fq = theta_from_radius(torch.abs(rad), theta_d_max, D, distortion_model)
+
+
+    fq = fq.reshape(batch_size, xx.shape[0]//2, xx.shape[1]//2)   
+    sq =  torch.flip(torch.flip(fq, dims=[0]), (0, 2)) #Q2
+    fh = torch.cat((sq, fq), dim=2)
+    sh = torch.flip(torch.flip(fh, [0, 1]), [0])
+    theta = torch.cat((fh, sh), dim=1)
+    # import pdb;pdb.set_trace()
+    #     import pdb;pdb.set_trace()
+    xx_ = xx.unsqueeze(0).expand(batch_size, -1, -1)
+    yy_ = yy.unsqueeze(0).expand(batch_size, -1, -1)
+    phi_ = phi.unsqueeze(0).expand(batch_size, -1, -1)
+
+    x_out = torch.where(x_major.unsqueeze(0).expand(batch_size, -1, -1), 
+                        torch.sign(xx_)*k*theta, 
+                        torch.sign(xx_)*k*theta/torch.abs(torch.tan(phi_+2*np.pi)))
+    y_out = torch.where(x_major.unsqueeze(0).expand(batch_size, -1, -1), 
+                        torch.sign(yy_)*k*theta*torch.abs(torch.tan(phi_+2*np.pi)), 
+                        torch.sign(yy_)*k*theta)
+    
+    return x_out, y_out
+
+
+#########################################################  cube map #########################################################
+
+
+def cubemap(image, n_rad, fov, xi, h, order):
+
+
+    # fov = 175
+    # xi = 0.2
+    # h = 128
+
+    img_size= h #64
+    bg= 0.3
+    f = compute_focal(np.deg2rad(fov), xi, h)
+
+
+    #here correct (not nan)
+    e = EnvironmentMap(image, format_='fisheye', dist=[f/(h/img_size),xi])
+    #breakpoint()
+    basedim= n_rad*h//2 #always make it the half of H
+    cube = e.copy().convertTo('cube',4*basedim, order=order)
+    #print(cube.data.shape)
+
+    all_cube= cube.data
+
+    all_cube[basedim//2:2*basedim+basedim//2, basedim//2 :2*basedim+basedim//2]=0 + bg
+    #test with removing the nan
+    all_cube[np.isnan(all_cube)]=0 + bg
+
+    #plt.imsave('cube.png', all_cube)
+
+    #print(np.where(np.isnan(all_cube)))
+
+    top = all_cube[0:basedim, basedim:2*basedim]
+    front = all_cube[basedim:2*basedim, basedim:2*basedim]
+    right= np.fliplr(np.flipud(all_cube[basedim:2*basedim, 2*basedim:3*basedim]))
+    back = all_cube[3*basedim:4*basedim, basedim:2*basedim] 
+    left= np.fliplr(np.flipud(all_cube[1*basedim:2*basedim, 0:basedim]))
+    bottom= all_cube[2*basedim:3*basedim, basedim:2*basedim]
+
+    cubemap= np.zeros((3*basedim,3*basedim,image.ndim))+bg
+    cubemap[0:basedim, basedim:2*basedim]= bottom
+    cubemap[basedim:2*basedim,0:basedim]= left
+    cubemap[basedim:2*basedim,basedim:2*basedim]= back
+    cubemap[basedim:2*basedim,2*basedim:3*basedim]= right
+    cubemap[2*basedim:3*basedim,basedim:2*basedim] = top
+    # print(cubemap.shape)
+    x,y= np.where(np.any(cubemap!=bg, axis=-1))
+    min_x, max_x, min_y, max_y = x.min(), x.max(), y.min(),y.max()
+    # print(min_x, min_y, max_x, max_y)
+    # plt.imsave(os.path.join(out_folder, 'before_cubemap_{}.png'.format(xi)), cubemap)
+
+    new_cubemap= cubemap[min_y:max_y+1,min_x:max_x+1]
+
+    return new_cubemap
+
+def fish2world(u,v, dist):
+
+    #f= 160.18708016904978
+    #xi= 0.95
+    #u = u * 2 - 1
+    #v = v * 2 - 1
+
+    f, xi, H = dist
+
+    r= np.sqrt((u-0.5)**2+(v-0.5)**2)
+    valid = r <= 1 #np.ones(r.shape, dtype='bool') #r <= 1
+
+    u0, v0 = H//2, H//2
+    u = (u*H - u0) / f
+    v = (v*H - v0) / f
+
+    omega= (xi + np.sqrt(1+(1-xi**2)*(u**2+v**2))) / (u**2+ v**2 +1)
+    x = omega * u
+    y= omega * v 
+    z= omega - xi
+
+
+    #breakpoint()
+    return x,y,z
+
+def world2cube(x, y, z):
+    # world -> cube
+    x = np.atleast_1d(np.asarray(x))
+    y = np.atleast_1d(np.asarray(y))
+    z = np.atleast_1d(np.asarray(z))
+    u = np.zeros(x.shape)
+    v = np.zeros(x.shape)
+
+    # forward
+    indForward = np.nonzero(
+        land(land(z <= 0, z <= -np.abs(x)), z <= -np.abs(y)))
+    u[indForward] = 1.5 - 0.5 * x[indForward] / z[indForward]
+    v[indForward] = 1.5 + 0.5 * y[indForward] / z[indForward]
+
+    # backward
+    indBackward = np.nonzero(
+        land(land(z >= 0,  z >= np.abs(x)),  z >= np.abs(y)))
+    u[indBackward] = 1.5 + 0.5 * x[indBackward] / z[indBackward]
+    v[indBackward] = 3.5 + 0.5 * y[indBackward] / z[indBackward]
+
+    # down
+    indDown = np.nonzero(
+        land(land(y <= 0,  y <= -np.abs(x)),  y <= -np.abs(z)))
+    u[indDown] = 1.5 - 0.5 * x[indDown] / y[indDown]
+    v[indDown] = 2.5 - 0.5 * z[indDown] / y[indDown]
+
+    # up
+    indUp = np.nonzero(land(land(y >= 0,  y >= np.abs(x)),  y >= np.abs(z)))
+    u[indUp] = 1.5 + 0.5 * x[indUp] / y[indUp]
+    v[indUp] = 0.5 - 0.5 * z[indUp] / y[indUp]
+
+    # left
+    indLeft = np.nonzero(
+        land(land(x <= 0,  x <= -np.abs(y)),  x <= -np.abs(z)))
+    u[indLeft] = 0.5 + 0.5 * z[indLeft] / x[indLeft]
+    v[indLeft] = 1.5 + 0.5 * y[indLeft] / x[indLeft]
+
+    # right
+    indRight = np.nonzero(land(land(x >= 0,  x >= np.abs(y)),  x >= np.abs(z)))
+    u[indRight] = 2.5 + 0.5 * z[indRight] / x[indRight]
+    v[indRight] = 1.5 - 0.5 * y[indRight] / x[indRight]
+
+    # bring back in the [0,1] intervals
+    u = u / 3.
+    v = v / 4.
+
+    if u.size == 1:
+        return u.item(), v.item()
+
+    return u, v
+def imageCoordinates(h, w):
+    """Returns the (u, v) coordinates for each pixel center."""
+    cols = np.linspace(0, 1, w*2 + 1)
+    rows = np.linspace(0, 1, h*2 + 1)
+
+    cols = cols[1::2]
+
+    rows = rows[1::2]
+
+    return [d.astype('float32') for d in np.meshgrid(cols, rows)]
+
+def interpolate(h, w, u, v):
+    u = u.clone()
+    v = v.clone()
+
+    # To avoid displacement due to the padding
+    u += 0.5 / w
+    v += 0.5 / h
+
+    # Normalize u and v to [-1, 1] for grid_sample
+    u = 2 * u - 1
+    v = 2 * v - 1
+
+    grid = torch.stack((u, v), dim=-1)
+
+    return grid
+
+def cube_inv_grid(B, basedim, dist):
+
+    h = 4*basedim
+    w = 3*basedim
+
+    # breakpoint()
+
+    fov = dist[2][0]
+    f  = dist[1]
+    xi = dist[0]
+    grid_ = torch.zeros(B, h, w, 2)
+    B = xi.shape[0]
+    for i in range(B):
+        # import pdb;pdb.set_trace()
+        f_ = f[i].cpu().numpy()
+        xi_ = xi[i].cpu().numpy()
+        grid_x, grid_y = imageCoordinates(h, w)
+        dx, dy, dz = fish2world(grid_x, grid_y, [f_,xi_, 128])
+        u, v = world2cube(dx, dy, dz)
+        grid = interpolate(h, w, torch.tensor(u), torch.tensor(v))
+        grid_[i] = grid
+    
+    return grid_
+
+
+def cube_inv(cube, grid_):
+
+
+# Assume cube is a tensor with shape (2, 128, 128, 3)
+    # import pdb;pdb.set_trace()
+    B, C, H, W = cube.shape
+    basedim = cube.shape[-1]//2
+
+    
+
+    # Create tensors for re_cubemap and new_cube
+    re_cubemap = torch.zeros((B, C, 4*basedim, 3*basedim), dtype=cube.dtype)
+    cubemap = torch.zeros((B, C, 3*basedim, 3*basedim), dtype=cube.dtype)
+
+    # Assign cube to the center of cubemap
+    cubemap[:, :, basedim//2:-basedim//2, basedim//2:-basedim//2] = cube
+
+    # Bottom face
+    re_cubemap[:, :, 2*basedim:3*basedim, basedim:2*basedim] = cubemap[:, :, 0:basedim, basedim:2*basedim]
+
+    # Left face (flipping upside-down and left-right)
+    re_cubemap[:, :, basedim:2*basedim, 0:basedim] = torch.flip(cubemap[:, :, basedim:2*basedim, 0:basedim], dims=[2, 3])
+
+    # Back face
+    re_cubemap[:, :, 3*basedim:4*basedim, basedim:2*basedim] = cubemap[:, :, basedim:2*basedim, basedim:2*basedim]
+
+    # Right face (flipping upside-down and left-right)
+    re_cubemap[:, :, basedim:2*basedim, 2*basedim:3*basedim] = torch.flip(cubemap[:, :, basedim:2*basedim, 2*basedim:3*basedim], dims=[2, 3])
+
+    # Front face
+    re_cubemap[:, :, 0:basedim, basedim:2*basedim] = cubemap[:, :, 2*basedim:3*basedim, basedim:2*basedim]
+
+    # The re_cubemap tensor now contains the rearranged cubemap faces
+    new_cube = re_cubemap
+    # im = interpolate(new_cube[0], torch.tensor(u), torch.tensor(v))
+
+    interpolated_img = F.grid_sample(new_cube, grid_, mode='bilinear', align_corners=True)
+
+    resized_tensor = F.interpolate(interpolated_img, size=(H, W), mode='bilinear', align_corners=True)
+
+    return resized_tensor
