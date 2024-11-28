@@ -14,7 +14,7 @@ import numpy as np
 import torch.utils.checkpoint as checkpoint
 from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-# from utils_curve import get_sample_params_from_subdiv, concentric_dic_sampling_origin, Eliptical_mapping
+from utils_curve import get_sample_params_from_subdiv, concentric_dic_sampling_origin, Eliptical_mapping
 from utils_curve_inverse import concentric_dic_sampling, DA_grid_inv, DA_grid_inv_
 
 # from utils_c import get_sample_params_from_subdiv, concentric_dic_sampling_origin, Eliptical_mapping
@@ -870,10 +870,10 @@ class PatchEmbed(nn.Module):
 
         dist = dist.transpose(1,0)
 
-        breakpoint()
+        # breakpoint()
         radius_buffer, azimuth_buffer = 0, 0
         # breakpoint()
-        xc, yc = concentric_dic_sampling(
+        xc, yc = concentric_dic_sampling_origin(
             subdiv=self.subdiv,
             img_size=self.img_size,
             distortion_model = self.distoriton_model,
@@ -893,7 +893,7 @@ class PatchEmbed(nn.Module):
         tensor = nn.functional.grid_sample(x, out, mode='bilinear', align_corners = True)
         pil(x[1]).save('high.png')
 
-        tensor = nn.functional.interpolate(tensor, size=self.img_size, mode='bilinear', align_corners=True)
+        # tensor = nn.functional.interpolate(tensor, size=self.img_size, mode='bilinear', align_corners=True)
    
 
         # breakpoint()
@@ -1093,16 +1093,16 @@ class SwinTransformerAng(nn.Module):
             x = x.view(B,L, self.n_radius*self.n_azmiuth,-1)
             x = x.permute(0,3,1,2).contiguous() #B,C,H,W
         return x
-    def forward(self, x, dist):
+    def forward(self, x, dist, cl):
         x, grid_ = self.forward_features(x, dist)
         # breakpoint()
         # x = self.forward_up_features(x ,x_downsample, theta_max)
         # x = self.up_x4(x)
         # img = torch.zeros(1, 3, 128, 128)
         grid_ = grid_.cuda()
-        # breakpoint()
-        img = nn.functional.grid_sample(x, grid_, mode='bilinear', align_corners = True)
-        # lab = restruct(x_lab, cls, 3, self.img_size, self.img_size)
+        breakpoint()
+        # img = nn.functional.grid_sample(x, grid_, mode='bilinear', align_corners = True)
+        img = restruct(x, cl, 3, self.img_size, self.img_size)
         return x, img
 
     def flops(self):
@@ -1148,9 +1148,9 @@ if __name__=='__main__':
     
 
     t = torch.ones(1, 3, 128, 128).float().cuda()
-    img1 = Image.open('1.png')
+    img1 = Image.open('04087_FV.png')
     # label = Image.open('img-282_0.0.png')
-    img = Image.open('9.png')
+    img = Image.open('04087_FV.png')
    
 
     # img1 = Image.open('04087_FV.png')
@@ -1181,18 +1181,31 @@ if __name__=='__main__':
     # print('')
     # xi = 0.2
     #xi = 0.9, 60.449175011552
+
+    with open('/home-local2/akath.extra.nobkp/12NN_3_128_el.pkl', 'rb') as f:
+        data = pkl.load(f)
+
+    xi = data[0][2]
+    # xi = 0.0
+    f = data[0][1]
+    cls = data[0][0]
+    cls = cls.cuda()
+
+    cls = cls.reshape(1, cls.shape[0], cls.shape[1])
+    cl = torch.cat((cls, cls), dim = 0)
     #xi = 0.1, 9.20039753119002
     #xi = 0.3, 22.012591901280512
     #xi = 0.05 5.997348938667396
     fov = math.radians(175)
-    dist = torch.tensor(np.array([0.1, 9.20039753119002,  fov]).reshape(1, 3)).float().cuda()
-    dist1 = torch.tensor(np.array([0.9, 60.449175011552,  fov]).reshape(1, 3)).float().cuda()
+    dist = torch.tensor(np.array([xi, f,  fov]).reshape(1, 3)).float().cuda()
+    dist1 = torch.tensor(np.array([xi, f,  fov]).reshape(1, 3)).float().cuda()
     dist = torch.cat((dist, dist1), dim = 0)
     
 
-    pol, cart = model(im, dist)
 
-    # breakpoint()
+    pol, cart = model(im, dist, cl)
+
+    breakpoint()
     pol1 = pil(pol[0])
     cart1 = pil(cart[0])
 

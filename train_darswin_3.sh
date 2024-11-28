@@ -6,11 +6,11 @@ export WANDB_MODE="disabled"
 
 
 python -m torch.distributed.launch \
---nproc_per_node 4 \
+--nproc_per_node 3 \
 --master_port 12345  main.py \
 --cfg configs/swin/stanford_3.yaml \
---output /home/prongs/scratch/Radial-unet-stanford-recon-3--no-unet-test \
---data-path  $SLURM_TMPDIR/data_new/semantic2d3d \
+--output /home-local2/akath.extra.nobkp/rad_3 \
+--data-path  /home-local2/akath.extra.nobkp/semantic2d3d \
 --fov 175.0 \
 --xi 0.0 \
 --batch-size 4

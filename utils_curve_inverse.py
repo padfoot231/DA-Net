@@ -426,7 +426,7 @@ def DA_grid(Dmin, grid_size):
     grid_size = grid_size[0] + 1
     x = torch.linspace(-1, 1, grid_size)
     y = torch.linspace(-1, 1, grid_size)
-    xx, yy = torch.meshgrid(x, y, indexing='ij')
+    xx, yy = torch.meshgrid(x, y)
     phi = torch.atan2(yy, xx)
     tolerance = 1e-8
 
@@ -671,7 +671,7 @@ def DA_grid_inv(D, img_size, distortion_model):
 
     x = torch.linspace(-1, 1, grid_size)
     y = torch.linspace(-1, 1, grid_size)
-    xx, yy = torch.meshgrid(x, y, indexing='ij')
+    xx, yy = torch.meshgrid(x, y)
 
     # u_, v_ = square_to_disc(u, v)
     xx, yy = disc_to_square(xx, yy)
@@ -760,7 +760,7 @@ def DA_grid_inv_(D, img_size, distortion_model):
 
     x = torch.linspace(-1, 1, img_size)
     y = torch.linspace(-1, 1, img_size)
-    xx, yy = torch.meshgrid(x, y, indexing='ij')
+    xx, yy = torch.meshgrid(x, y)
 
     xx, yy = xx, yy
 

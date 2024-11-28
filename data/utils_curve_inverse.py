@@ -15,9 +15,10 @@ import torch.nn as nn
 # profiler = Profiler(interval=0.0001)
 import torch.nn.functional as F
 import torchvision.transforms as T
-# import cv2
 from envmap import EnvironmentMap
 from numpy import logical_and as land, logical_or as lor
+
+# import cv2
 
 import SimpleITK as sitk
 from medpy import metric
@@ -425,7 +426,7 @@ def DA_grid(Dmin, grid_size):
     grid_size = grid_size[0] + 1
     x = torch.linspace(-1, 1, grid_size)
     y = torch.linspace(-1, 1, grid_size)
-    xx, yy = torch.meshgrid(x, y, indexing='ij')
+    xx, yy = torch.meshgrid(x, y)
     phi = torch.atan2(yy, xx)
     tolerance = 1e-8
 
@@ -454,7 +455,7 @@ def DA_grid(Dmin, grid_size):
 
 
     # Assign values from `theta` based on the condition
-    batch_indices = torch.arange(batch_size).unsqueeze(1).unsqueeze(2).cuda()
+    batch_indices = torch.arange(batch_size).unsqueeze(1).unsqueeze(2)
     rad_fin[condition] = Dmin[batch_indices.expand_as(i_dist), i_dist.long()][condition]
     rad_fin[~condition] = Dmin[batch_indices.expand_as(j_dist), j_dist.long()][~condition]
 
@@ -670,7 +671,7 @@ def DA_grid_inv(D, img_size, distortion_model):
 
     x = torch.linspace(-1, 1, grid_size)
     y = torch.linspace(-1, 1, grid_size)
-    xx, yy = torch.meshgrid(x, y, indexing='ij')
+    xx, yy = torch.meshgrid(x, y)
 
     # u_, v_ = square_to_disc(u, v)
     xx, yy = disc_to_square(xx, yy)
@@ -692,7 +693,6 @@ def DA_grid_inv(D, img_size, distortion_model):
     # im[:, 3:-4, 4:]
     rad = rad.reshape(-1)
     # rad = torch.cat((torch.tensor([0]).cuda(), rad), dim=0)
-    # breakpoint()
     rad[0] = 0
 
     
@@ -746,6 +746,7 @@ def DA_grid_inv(D, img_size, distortion_model):
     x_out, y_out = x_out.cuda(), y_out.cuda()
     
     return x_out, y_out
+
 
 def DA_grid_inv_(D, img_size, distortion_model):
 
@@ -808,11 +809,7 @@ def DA_grid_inv_(D, img_size, distortion_model):
                         torch.sign(yy_)*k*theta)
     
     return x_out, y_out
-
-
-#########################################################  cube map #########################################################
-
-
+    
 def cubemap(image, n_rad, fov, xi, h, order):
 
 
@@ -865,12 +862,8 @@ def cubemap(image, n_rad, fov, xi, h, order):
 
     return new_cubemap
 
-def fish2world(u,v, dist):
 
-    #f= 160.18708016904978
-    #xi= 0.95
-    #u = u * 2 - 1
-    #v = v * 2 - 1
+def fish2world(u,v, dist):
 
     f, xi, H = dist
 
@@ -972,8 +965,6 @@ def cube_inv_grid(B, basedim, dist):
     h = 4*basedim
     w = 3*basedim
 
-    # breakpoint()
-
     fov = dist[2][0]
     f  = dist[1]
     xi = dist[0]
@@ -992,7 +983,7 @@ def cube_inv_grid(B, basedim, dist):
     return grid_
 
 
-def cube_inv(cube, grid_):
+def cube_inv(cube, grid):
 
 
 # Assume cube is a tensor with shape (2, 128, 128, 3)
@@ -1003,8 +994,8 @@ def cube_inv(cube, grid_):
     
 
     # Create tensors for re_cubemap and new_cube
-    re_cubemap = torch.zeros((B, C, 4*basedim, 3*basedim), dtype=cube.dtype)
-    cubemap = torch.zeros((B, C, 3*basedim, 3*basedim), dtype=cube.dtype)
+    re_cubemap = torch.zeros((B, C, 4*basedim, 3*basedim), dtype=cube.dtype).cuda()
+    cubemap = torch.zeros((B, C, 3*basedim, 3*basedim), dtype=cube.dtype).cuda()
 
     # Assign cube to the center of cubemap
     cubemap[:, :, basedim//2:-basedim//2, basedim//2:-basedim//2] = cube
@@ -1024,12 +1015,13 @@ def cube_inv(cube, grid_):
     # Front face
     re_cubemap[:, :, 0:basedim, basedim:2*basedim] = cubemap[:, :, 2*basedim:3*basedim, basedim:2*basedim]
 
-    # The re_cubemap tensor now contains the rearranged cubemap faces
-    new_cube = re_cubemap
     # im = interpolate(new_cube[0], torch.tensor(u), torch.tensor(v))
+    # grid_ = cube_inv_grid(B, basedim, dist)
+    # grid_ = grid_.cuda()
 
-    interpolated_img = F.grid_sample(new_cube, grid_, mode='bilinear', align_corners=True)
+    # breakpoint()
+    interpolated_img = F.grid_sample(re_cubemap, grid, mode='bilinear', align_corners=True)
 
-    resized_tensor = F.interpolate(interpolated_img, size=(H, W), mode='bilinear', align_corners=True)
+    resized_tensor = F.interpolate(interpolated_img, size=(H//3, W//3), mode='bilinear', align_corners=True)
 
     return resized_tensor

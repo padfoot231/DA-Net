@@ -181,9 +181,14 @@ Distortion= {
 # mean = [0.3742, 0.3776, 0.3574]
 # std = [0.2792, 0.2748, 0.2866]
 
+#stanford fisheye
+
+mean = [0.4312, 0.4154, 0.3693]
+std = [0.2715, 0.2649, 0.2534]
+
 #CVRGpano highdistort
-mean = [0.3977, 0.4041, 0.4012]
-std = [0.2794, 0.2807, 0.2894]
+# mean = [0.3977, 0.4041, 0.4012]
+# std = [0.2794, 0.2807, 0.2894]
 
 #Matterport
 # mean= [0.2217, 0.1939, 0.1688]
@@ -212,7 +217,7 @@ class Stanford(Dataset):
                 img = pkl.load(f)
             with open(base_dir + '/train_sem.pkl', 'rb') as f:
                 sem = pkl.load(f)
-            with open(base_dir + '/12NN_3_128_el', 'rb') as f:
+            with open(base_dir + '/12NN_3_128_el.pkl', 'rb') as f:
                 dist = pkl.load(f)
 
         elif split == 'val':
@@ -220,7 +225,7 @@ class Stanford(Dataset):
                 img = pkl.load(f)
             with open(base_dir + '/val_sem.pkl', 'rb') as f:
                 sem = pkl.load(f)
-            with open(base_dir + '/12NN_3_128_el', 'rb') as f:
+            with open(base_dir + '/12NN_3_128_el.pkl', 'rb') as f:
                 dist = pkl.load(f)
 
         elif split == 'test':
@@ -237,7 +242,7 @@ class Stanford(Dataset):
                 deg = pkl.load(f)
                 self.deg = deg
 
-
+        self.dist = dist
         self.img = img #['1LXtFkjw3qL/85_spherical_1_emission_center_0.png'] #data[:5]
         self.sem = sem
 
@@ -300,18 +305,18 @@ class Stanford(Dataset):
             # print("field of view", fov)
             if self.split=='train' or self.split=='val':
 
-                xi = random.uniform(0.8, 0.9)
-                # xi = 1 - xi
-                # print(xi)
+                # xi = random.uniform(0.8, 0.9)
+                i = random.randint(0, len(self.dist)-1)
+                xi = self.dist[i][2]
+                cl = self.dist[i][0]
                 deg = random.uniform(0, 360)
                 # print(xi, fov, deg)
             elif self.split=='test':
                 xi= self.xi
-
+                cl = self.dist[xi][0]
                 deg = self.deg[idx]
 
 
-            # print(xi, deg)
             image, f = warpToFisheye(image[:, :, :3], viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=1)
             segm,_= warpToFisheye(segm, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(deg), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=fov, order=0)
             dist= np.array([xi, f/(h/self.img_size), np.deg2rad(fov)]).astype(np.float32)
@@ -321,27 +326,18 @@ class Stanford(Dataset):
 
         image = resize(image, (self.img_size,self.img_size), order = 1).astype(np.uint8)
         label= resize(segm, (self.img_size,self.img_size), order = 0)
-        im = Image.fromarray(image)
+        # im = Image.fromarray(image)
 
         image = T(image)
         label = segm_transform(label)
         ############################################# masks ############################################################
         res = 1024
-        # breakpoint()
-        # cartesian = torch.cartesian_prod(
-        #     torch.linspace(-1, 1, res),
-        #     torch.linspace(1, -1, res)
-        # ).reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
 
         cartesian = torch.meshgrid(
             torch.linspace(-1, 1, res),
-            torch.linspace(1, -1, res), indexing='ij'
+            torch.linspace(1, -1, res)
         )
         cartesian = torch.stack((cartesian[0], cartesian[1]), dim=-1).transpose(2, 1).transpose(1, 0).transpose(1, 2)
-        # breakpoint()
-        
-        
-        # .reshape(res, res, 2).transpose(2, 1).transpose(1, 0).transpose(1, 2)
 
         radius = cartesian.norm(dim=0)
         mask = (radius > 0.0) & (radius < 1) 
@@ -357,25 +353,16 @@ class Stanford(Dataset):
             sample['image']= image.type(torch.float32)
             sample['label']= label.type(torch.uint8)
         one_hot = F.one_hot(sample['label'].to(torch.int64), num_classes=14).to(torch.float32)
-        # sample['image']= sample['image'].permute(2,0,1)
-        # sample['label']= sample['label']
 
         sample['dist'] = dist
-        # print(sample['label'].shape)
-        
 
-        # sample['label']= sample['label'].squeeze(0)
-
-        if normalize is not None:
-            sample['image']= normalize(sample['image'])
         sample['one_hot'] = one_hot
         sample['mask'] = mask1[0].to(torch.long)
 
-        #print(sample.keys())
-        return sample['image'], sample['label'][:, :, 0], sample['dist'] , sample['mask'], one_hot[:, :, 0]
+        return sample['image'], sample['label'][:, :, 0], cl, sample['dist'] , sample['mask'], one_hot[:, :, 0]
 
 def get_mean_std(base_dir ):
-    db= CVRG(base_dir, split="train", transform=None)
+    db= Stanford(root_path, split="train",grp="vlow",  n_rad=5, transform=None)
     print(len(db))
     #sample= db.__getitem__(0)
     #print(sample['image'].shape)
@@ -383,7 +370,7 @@ def get_mean_std(base_dir ):
     #print(sample['dist'].shape)
     loader = DataLoader(db, batch_size=len(db), shuffle=False,num_workers=0)
     im_lab_dict = next(iter(loader))
-    images, labels, dist, cls, mask, one_hot = im_lab_dict
+    images, labels, dist, mask, one_hot = im_lab_dict
     # shape of images = [b,c,w,h]
     mean, std = images.mean([0,2,3]), images.std([0,2,3])
     print("mean",mean)
@@ -392,11 +379,11 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/localscratch/prongs.50847042.0/data_new/semantic2d3d'
+    root_path= '/home-local2/akath.extra.nobkp/semantic2d3d'
     # breakpoint()
-    db= Stanford(root_path, split="train", n_rad=5, transform=None)
+    db= Stanford(root_path, split="train",grp="vlow",  n_rad=5, transform=None)
     
-    # mean,std= get_mean_std(root_path)
+    mean,std= get_mean_std(root_path)
     db[0]
     breakpoint()
     print("end")

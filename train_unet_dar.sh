@@ -6,11 +6,11 @@ export WANDB_MODE="disabled"
 
 
 python -m torch.distributed.launch \
---nproc_per_node 4 \
+--nproc_per_node 3 \
 --master_port 12346  main.py \
 --cfg configs/swin/stanford_unet_dar.yaml \
---output /home/prongs/scratch/Unet_pe_up \
---data-path  $SLURM_TMPDIR/data_new/semantic2d3d \
+--output /home-local2/akath.extra.nobkp/Unet_pe_up \
+--data-path  /home-local2/akath.extra.nobkp/semantic2d3d \
 --fov 175.0 \
 --xi 0.0 \
 --batch-size 8

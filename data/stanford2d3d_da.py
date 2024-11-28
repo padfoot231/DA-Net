@@ -186,8 +186,12 @@ Distortion= {
 # std = [0.2792, 0.2748, 0.2866]
 
 #CVRGpano highdistort
-mean = [0.3977, 0.4041, 0.4012]
-std = [0.2794, 0.2807, 0.2894]
+# mean = [0.3977, 0.4041, 0.4012]
+# std = [0.2794, 0.2807, 0.2894]
+
+#stanford2d3d 
+mean = [0.5351, 0.5160, 0.4576]
+std = [0.1730, 0.1731, 0.1852]
 
 #Matterport
 # mean= [0.2217, 0.1939, 0.1688]
@@ -320,7 +324,7 @@ class Stanford_da(Dataset):
 
         image = resize(image, (self.img_size,self.img_size), order = 1).astype(np.uint8)
         label= resize(segm, (self.img_size,self.img_size), order = 0)
-
+        import pdb;pdb.set_trace()
         image = T(image)
 
         #################################### image to DA transformation ############################################################
@@ -341,6 +345,12 @@ class Stanford_da(Dataset):
         y_ = y_/(self.img_size//2)
         # breakpoint()
         out = torch.cat((y_, x_), dim = 3)
+
+        image = image.unsqueeze(0)
+
+        image = nn.functional.grid_sample(image, out, align_corners = True)
+        # # print(image.shape)
+        image = nn.functional.interpolate(image, size=(self.img_size*self.n_rad, self.img_size*self.n_rad), mode='bilinear', align_corners = True)
         # out = out.cuda()
         # pil(image[0]).save("fish_8.png")
         # import pdb;pdb.set_trace()
@@ -367,7 +377,7 @@ class Stanford_da(Dataset):
 
         cartesian = torch.meshgrid(
             torch.linspace(-1, 1, res),
-            torch.linspace(1, -1, res), indexing='ij'
+            torch.linspace(1, -1, res)
         )
         cartesian = torch.stack((cartesian[0], cartesian[1]), dim=-1).transpose(2, 1).transpose(1, 0).transpose(1, 2)
         # breakpoint()
@@ -380,17 +390,18 @@ class Stanford_da(Dataset):
         mask1 = torch.nn.functional.interpolate(mask.unsqueeze(0).unsqueeze(0) * 1.0, (self.img_size), mode="nearest")
         ############################################# masks ############################################################
         #sample = {'image': image, 'label': label, 'path':b_path.replace('png','npy')}
-        sample = {'image': image, 'label': label}
+        sample = {'image': image[0], 'label': label}
         # print(self.transform)
         # if self.transform:
         if None:    
             sample = self.transform(sample)
         else:
-            sample['image']= image.type(torch.float32)
+            sample['image']= sample['image'].type(torch.float32)
             sample['label']= label.type(torch.uint8)
         one_hot = F.one_hot(sample['label'].to(torch.int64), num_classes=14).to(torch.float32)
         # sample['image']= sample['image'].permute(2,0,1)
         # sample['label']= sample['label']
+        
         # breakpoint()
         
         # print(sample['label'].shape)
@@ -405,28 +416,21 @@ class Stanford_da(Dataset):
         sample['grid'] = grid_[0]
 
         # sample['label']= sample['label'].squeeze(0)
-        # print(normalize)
+        # print(normalize) 
         if normalize is not None:
             sample['image']= normalize(sample['image'])
-        # print(sample['image'].max())
-        # breakpoint()
-        sample['image'] = sample['image'].unsqueeze(0)
 
-        sample['image'] = nn.functional.grid_sample(sample['image'], out, align_corners = True)
-        # # print(image.shape)
-        sample['image'] = nn.functional.interpolate(sample['image'], size=(self.img_size*self.n_rad, self.img_size*self.n_rad), mode='bilinear', align_corners = True)
-        # # breakpoint()
-        # pil(image[0]).save("cds_8.png")
 
         sample['one_hot'] = one_hot
         sample['mask'] = mask1[0].to(torch.long)
 
         #print(sample.keys())
         # breakpoint()
-        return sample['image'][0], sample['label'][:, :, 0],  sample['grid'], sample['mask'], one_hot[:, :, 0]
+
+        return sample['image'], sample['label'][:, :, 0],  sample['grid'], sample['mask'], one_hot[:, :, 0]
 
 def get_mean_std(base_dir ):
-    db= CVRG(base_dir, split="train", transform=None)
+    db= Stanford_da(root_path, split="train", grp="vlow", n_rad=3, transform=None)
     print(len(db))
     #sample= db.__getitem__(0)
     #print(sample['image'].shape)
@@ -434,7 +438,8 @@ def get_mean_std(base_dir ):
     #print(sample['dist'].shape)
     loader = DataLoader(db, batch_size=len(db), shuffle=False,num_workers=0)
     im_lab_dict = next(iter(loader))
-    images, labels, dist, cls, mask, one_hot = im_lab_dict
+    images, labels, grid, mask, one_hot = im_lab_dict
+    breakpoint()
     # shape of images = [b,c,w,h]
     mean, std = images.mean([0,2,3]), images.std([0,2,3])
     print("mean",mean)
@@ -443,13 +448,13 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/localscratch/prongs.52645748.0/data_new/semantic2d3d'
+    root_path= '/home-local2/akath.extra.nobkp/semantic2d3d'
     # breakpoint()
-    db= Stanford_da(root_path, split="test", grp="vlow", n_rad=3, transform=None)
+    db= Stanford_da(root_path, split="train", grp="vlow", n_rad=3, transform=None)
     
-    # mean,std= get_mean_std(root_path)
+    mean,std= get_mean_std(root_path) 
     db[20]
-    breakpoint()
+    # breakpoint()
     print("end")
     
     data_loader_train = torch.utils.data.DataLoader(
@@ -460,9 +465,11 @@ if __name__ == "__main__":
         drop_last=True,
     )
     # mean,std= get_mean_std(root_path)
-    for idx, (samples, targets, dist, cls, mask, one_hot) in enumerate(data_loader_train):
+    for idx, (images, labels, grid, mask, one_hot) in enumerate(data_loader_train):
         breakpoint()
-        print(samples)
+        im = pil(images[0])
+        im.save('img_norm1.png')
+        print(images)
 
 #     mean tensor([0.9735, 1.2531, 1.3141])
 # std tensor([1.4566, 1.5787, 1.5510])

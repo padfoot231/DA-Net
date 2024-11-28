@@ -5,7 +5,9 @@ from einops import rearrange
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 # from utils_tan import get_sample_params_from_subdiv, concentric_dic_sampling_origin
 # from utils_c import get_sample_params_from_subdiv, concentric_dic_sampling_origin
-from utils_curve_inverse import concentric_dic_sampling, DA_grid_inv
+# from utils_curve_inverse import concentric_dic_sampling, DA_grid_inv
+from utils_curve import concentric_dic_sampling_origin
+
 from envmap import EnvironmentMap
 from envmap import rotation_matrix
 import torch
@@ -403,7 +405,7 @@ class FinalPatchExpand_X4(nn.Module):
         # self.m = nn.ConvTranspose2d(dim, dim, kernel_size = (4, 4), stride=(4, 4))
         # self.n = nn.ConvTranspose2d(dim, dim, kernel_size = (4, 4), stride=(4, 4))
 
-        # self.m = nn.ConvTranspose2d(dim, dim, kernel_size = (k_s, k_s), stride=(k_s, k_s))
+        self.m = nn.ConvTranspose2d(dim, dim, kernel_size = (k_s, k_s), stride=(k_s, k_s))
         self.n = nn.ConvTranspose2d(dim, dim, kernel_size = (patch_size, patch_size), stride=(patch_size, patch_size))
 
         self.output_dim = dim 
@@ -417,8 +419,8 @@ class FinalPatchExpand_X4(nn.Module):
         B, L, C = x.shape
         assert L == H * W, "input feature has wrong size"
         x = x.view(B, self.rad_cut, self.rad_cut, C).transpose(2, 3).transpose(1, 2)
-        # x = self.m(self.n(x)).transpose(1, 2).transpose(2,3)
-        x = self.n(x).transpose(1, 2).transpose(2,3)
+        x = self.m(self.n(x)).transpose(1, 2).transpose(2,3)
+        # x = self.n(x).transpose(1, 2).transpose(2,3)
         # x = x
         # x = self.expand(x)
         # B, L, C = x.shape
@@ -640,9 +642,9 @@ class PatchEmbed(nn.Module):
         # self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(3, 3), stride=(3, 3))
         # self.proj1 = nn.Conv2d(in_chans, embed_dim, kernel_size=(4, 4), stride=(4, 4))
         # self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(4, 4), stride=(4, 4))
-
+        self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(k_s, k_s), stride=(k_s, k_s))
         self.proj1 = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-        # self.proj2 = nn.Conv2d(embed_dim, embed_dim, kernel_size=(k_s, k_s), stride=(k_s, k_s))
+        
 
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
@@ -656,13 +658,12 @@ class PatchEmbed(nn.Module):
         assert H == self.img_size[0] and W == self.img_size[1], \
             f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
         dist = dist.transpose(1,0)
-        # breakpoint()
         img = pil(x[0])
         img.save('og_im_.png')
-        xc, yc = concentric_dic_sampling(
+        xc, yc = concentric_dic_sampling_origin(
             subdiv=self.subdiv,
             img_size=self.img_size,
-            distortion_model = "polynomial",
+            distortion_model = "spherical",
             D = dist)
         # sample_locations = get_sample_locations(**params)  ## B, azimuth_cuts*radius_cuts, n_radius*n_azimut
         B, n_r, n_a = xc.shape
@@ -671,13 +672,12 @@ class PatchEmbed(nn.Module):
         y_ = yc.reshape(B, n_r, n_a, 1).float()
         y_ = y_/(W//2)
         # out = torch.cat((y_, x_), dim = 3)
-        # breakpoint()
         out = torch.cat((y_, x_), dim = 3)
         out = out.cuda()
         tensor = nn.functional.grid_sample(x, out, align_corners = True)
 
-        x_inv, y_inv = DA_grid_inv(dist, self.img_size[0], 'polynomial')
-        grid_ = torch.cat((y_inv.unsqueeze(-1), x_inv.unsqueeze(-1)), dim = 3).cuda()
+        # x_inv, y_inv = DA_grid_inv(dist, self.img_size[0], 'polynomial')
+        # grid_ = torch.cat((y_inv.unsqueeze(-1), x_inv.unsqueeze(-1)), dim = 3).cuda()
 
         # tensor = torch.flip(tensor, dims=[2,3])
         img = pil(tensor[0])
@@ -688,13 +688,13 @@ class PatchEmbed(nn.Module):
         # label = nn.functional.grid_sample(label, out, align_corners = True, mode = 'nearest')
         # img = pil(tensor[0].detach().cpu())
         # img.save('test_new_.png')
-        # tensor = self.proj2((self.proj1(tensor))).flatten(2).transpose(1, 2)
-        tensor = self.proj1(tensor).flatten(2).transpose(1, 2)
+        tensor = self.proj2((self.proj1(tensor))).flatten(2).transpose(1, 2)
+        # tensor = self.proj1(tensor).flatten(2).transpose(1, 2)
 
         # x = self.proj(x).flatten(2).transpose(1, 2)  # B Ph*Pw C
         if self.norm is not None:
             x = self.norm(tensor)
-        return x, grid_
+        return x
 
     def flops(self):
         Ho, Wo = self.patches_resolution
@@ -730,7 +730,7 @@ class Radial_curve_cds(nn.Module):
         use_checkpoint (bool): Whether to use checkpointing to save memory. Default: False
     """
 
-    def __init__(self, img_size=(768, 768), patch_size=4, n_radius = 3, in_chans=3, num_classes=1000,
+    def __init__(self, img_size=128, patch_size=4, n_radius = 3, in_chans=3, num_classes=1000,
                  embed_dim=96, depths=[2, 2, 2, 2], depths_decoder=[1, 2, 2, 2], num_heads=[3, 6, 12, 24],
                  window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
@@ -740,7 +740,7 @@ class Radial_curve_cds(nn.Module):
 
         # import pdb;pdb.set_trace()
 
-        img_size = img_size[0]
+        # img_size = img_size[0]
 
         print("SwinTransformerSys expand initial----depths:{};depths_decoder:{};drop_path_rate:{};num_classes:{}".format(depths,
         depths_decoder,drop_path_rate,num_classes))
@@ -824,7 +824,7 @@ class Radial_curve_cds(nn.Module):
             print("---final upsample expand_first---")
             self.up = FinalPatchExpand_X4(input_resolution=(img_size//patch_size,img_size//patch_size),dim_scale=2, n_rad = n_radius, patch_size=patch_size,  dim=embed_dim)
             # self.output = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
-            # self.output = UDnCNN(D = 2, C = embed_dim)
+            self.output = UDnCNN(D = 2, C = embed_dim)
             self.final = nn.Conv2d(in_channels=embed_dim,out_channels=self.num_classes,kernel_size=1,bias=False)
             # self.output = nn.Linear(embed_dim,self.num_classes)
 
@@ -849,7 +849,7 @@ class Radial_curve_cds(nn.Module):
 
     #Encoder and Bottleneck
     def forward_features(self, x, dist):
-        x, grid_ = self.patch_embed(x, dist)
+        x = self.patch_embed(x, dist)
         if self.ape:
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
@@ -861,7 +861,7 @@ class Radial_curve_cds(nn.Module):
 
         x = self.norm(x)  # B L C
   
-        return x, x_downsample, grid_
+        return x, x_downsample
 
     #Dencoder and Skip connection
     def forward_up_features(self, x, x_downsample):
@@ -886,19 +886,14 @@ class Radial_curve_cds(nn.Module):
             
         return x
 
-    def forward(self, x, dist):
-        # breakpoint()
+    def forward(self, x, dist, cls):
         B, C, H, W = x.shape
-        # breakpoint()
-        # label = label.reshape(B, 1, H, W).to(torch.float32)
-        x, x_downsample, grid_ = self.forward_features(x, dist)
+        x, x_downsample = self.forward_features(x, dist)
         x = self.forward_up_features(x,x_downsample)
         x = self.up_x4(x)
-        # breakpoint()
-        # x = self.output(x)
-        x  = nn.functional.grid_sample(x, grid_, align_corners = True)
+        x = restruct(x, cls, self.embed_dim, H, W)
+        x = self.output(x)
         x = self.final(x)
-        # breakpoint()
         # breakpoint()
         # label = label[:, 0]
 
@@ -960,8 +955,8 @@ if __name__=='__main__':
     
 
     t = torch.ones(1, 3, 128, 128).float().cuda()
-    img = Image.open('img-282.png')
-    label = Image.open('img-282_0.0.png')
+    # img = Image.open('img-282.png')
+    # label = Image.open('img-282_0.0.png')
     img = Image.open('04087_FV.png')
     label = Image.open('04087_FV.png')
     # image.save('new.png')
@@ -978,38 +973,38 @@ if __name__=='__main__':
 
     # dist = data[1]
     # dist = torch.tensor(dist).reshape(1, 3).cuda()
-    # breakpoint()
     # dist = torch.tensor(np.array([339.749, -31.988,  48.275,  -7.201]).reshape(1, 4)).float().cuda()
-    with open('/home/prongs/scratch/25_4_cl_curve_train.pkl', 'rb') as f:
+    with open('/home-local2/akath.extra.nobkp/12NN_3_128_el.pkl', 'rb') as f:
         data = pkl.load(f)
     # with open('/home/prongs/scratch/0.9.pkl', 'rb') as f:
     #     data = pkl.load(f)
     xi = data[0][2]
-    xi = 0.0
+    # xi = 0.0
     f = data[0][1]
     cls = data[0][0]
     # h = 128
     # image, f = warpToFisheye(img, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
     # lab, f = warpToFisheye(label, viewingAnglesPYR=[np.deg2rad(0), np.deg2rad(75), np.deg2rad(0)], outputdims=(h,h),xi=xi, fov=170, order=1)
-    dist = torch.tensor([ 0.05, 59.2647,  3.05433]).reshape(1, 3).cuda()
+    dist = torch.tensor([ xi, f,  3.05433], dtype=torch.float32).reshape(1, 3).cuda()
     # dist = torch.tensor(np.array([0.0, 11.17720,  3.05433]).reshape(1, 3)).float().cuda()
     # cls = np.load('key_10t10_1.pkl.npy')
     # cls = data[0]
     cls = cls.reshape(1, cls.shape[0], cls.shape[1])
-    # breakpoint()
+    
+    breakpoint()
     img = model(img, dist, cls)
-    pol = pil(pol[0])
-    cart = pil(cart[0])
-    pol_lab = pil(pol_lab[0])
-    cart_lab = pil(cart_lab[0])
-    pol_flip = ImageOps.flip(pol)
-    pol_flip.save('polar_new1.png')
-    pol_lab.save('polar_lab_new.png')
-    # img = Image.open('04087_FV.png')
-    # img = img.resize((128, 128))
-    # img.save('296test.png')
-    cart.save('cart.png')
-    cart_lab.save('cart_lab.png')
+    # pol = pil(pol[0])
+    # cart = pil(cart[0])
+    # pol_lab = pil(pol_lab[0])
+    # cart_lab = pil(cart_lab[0])
+    # pol_flip = ImageOps.flip(pol)
+    # pol_flip.save('polar_new1.png')
+    # pol_lab.save('polar_lab_new.png')
+    # # img = Image.open('04087_FV.png')
+    # # img = img.resize((128, 128))
+    # # img.save('296test.png')
+    # cart.save('cart.png')
+    # cart_lab.save('cart_lab.png')
     breakpoint()
     print("ass")
     # import pdb;pdb.set_trace()

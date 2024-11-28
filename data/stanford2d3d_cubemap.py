@@ -184,9 +184,13 @@ Distortion= {
 # std = [0.2792, 0.2748, 0.2866]
 
 #CVRGpano highdistort
-mean = [0.3977, 0.4041, 0.4012]
-std = [0.2794, 0.2807, 0.2894]
+# mean = [0.3977, 0.4041, 0.4012]
+# std = [0.2890, 0.2810, 0.2656]
 
+
+#cubemap 
+mean = [0.3841, 0.3701, 0.3307]
+std = [0.2886, 0.2810, 0.2662]
 #Matterport
 # mean= [0.2217, 0.1939, 0.1688]
 # std= [0.1884, 0.1744, 0.1835]
@@ -355,7 +359,7 @@ class Stanford_cubemap(Dataset):
 
         cartesian = torch.meshgrid(
             torch.linspace(-1, 1, res),
-            torch.linspace(1, -1, res), indexing='ij'
+            torch.linspace(1, -1, res)
         )
         cartesian = torch.stack((cartesian[0], cartesian[1]), dim=-1).transpose(2, 1).transpose(1, 0).transpose(1, 2)
         # breakpoint()
@@ -390,8 +394,10 @@ class Stanford_cubemap(Dataset):
 
         # sample['label']= sample['label'].squeeze(0)
         # breakpoint()
-        if normalize is not None:
-            sample['image']= normalize(sample['image'])
+        fi = pil(sample['image'])
+        fi.save("cube.png")
+        # if normalize is not None:
+        #     sample['image']= normalize(sample['image'])
         sample['one_hot'] = one_hot
         sample['mask'] = mask1[0].to(torch.long)
 
@@ -399,7 +405,7 @@ class Stanford_cubemap(Dataset):
         return sample['image'], sample['label'][:, :, 0], sample['grid'] , sample['mask'], one_hot[:, :, 0]
 
 def get_mean_std(base_dir ):
-    db= CVRG(base_dir, split="train", transform=None)
+    db= Stanford_cubemap(root_path, split="train", grp="vlow", n_rad=3, transform=None)
     print(len(db))
     #sample= db.__getitem__(0)
     #print(sample['image'].shape)
@@ -407,7 +413,7 @@ def get_mean_std(base_dir ):
     #print(sample['dist'].shape)
     loader = DataLoader(db, batch_size=len(db), shuffle=False,num_workers=0)
     im_lab_dict = next(iter(loader))
-    images, labels, dist, cls, mask, one_hot = im_lab_dict
+    images, labels, grid, mask, one_hot = im_lab_dict
     # shape of images = [b,c,w,h]
     mean, std = images.mean([0,2,3]), images.std([0,2,3])
     print("mean",mean)
@@ -416,7 +422,7 @@ def get_mean_std(base_dir ):
 
 
 if __name__ == "__main__":
-    root_path= '/localscratch/prongs.52559162.0/data_new/semantic2d3d'
+    root_path= '/home-local2/akath.extra.nobkp/semantic2d3d'
     # breakpoint()
     db= Stanford_cubemap(root_path, split="val", grp="vlow", n_rad=3, transform=None)
     
@@ -432,7 +438,7 @@ if __name__ == "__main__":
         pin_memory=True,
         drop_last=True,
     )
-    # mean,std= get_mean_std(root_path)
+    mean,std= get_mean_std(root_path)
     for idx, (samples, targets, dist, cls, mask, one_hot) in enumerate(data_loader_train):
         breakpoint()
         print(samples)

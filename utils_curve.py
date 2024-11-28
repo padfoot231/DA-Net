@@ -15,7 +15,6 @@ import torch.nn as nn
 # profiler = Profiler(interval=0.0001)
 import torch.nn.functional as F
 import torchvision.transforms as T
-from envmap import EnvironmentMap
 # import cv2
 
 import SimpleITK as sitk
@@ -365,9 +364,9 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     def g(x, m, n, a, b, c):
         return c*f(x, n, a, b) + (1-c)*h(x, m, a)
     def g_inv(y, m, n, a, b, c):
-        test_x = torch.linspace(0, theta_d_max, 100000)
-        test_y = g(test_x, m, n, a, b, c)
-        x = torch.zeros(num_points + 1)
+        test_x = torch.linspace(0, theta_d_max, 100000).cuda()
+        test_y = g(test_x, m, n, a, b, c).cuda()
+        x = torch.zeros(num_points + 1).cuda()
         for i in range(num_points + 1):
             lower_idx = test_y[test_y <= y[i]].argmax()
             x[i] = test_x[lower_idx]
@@ -383,7 +382,7 @@ def get_inverse_dist_spherical(num_points, xi, fov, new_f):
     # print("ass")
     # theta_d_max = torch.tan(fov/2)
     # theta_d = linspace(torch.tensor([0]).cuda(), g(theta_d_max), num_points+1).cuda()
-    theta_d = torch.linspace(0, g(theta_d_max, m = m, n = n, a = a, b = b, c = c), num_points + 1)
+    theta_d = torch.linspace(0, g(theta_d_max, m = m, n = n, a = a, b = b, c = c), num_points + 1).cuda()
 
     r_list = rad(xi, theta_d)
     # print("theta")
@@ -468,24 +467,24 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     r_ = torch.cat((torch.flip(flip, [0]), D_min[:, 1:]), axis = 1).transpose(0, 1)
     # A_ = r_1.reshape(D.shape[1], width, 1).repeat_interleave(width, 2)
     # B_ = r_1.reshape(D.shape[1], 1, width).repeat_interleave(width, 1)
-    R1 = torch.linspace(0.0, 1, width)
-    R2 = torch.linspace(0.0, 1, width)
+    R1 = torch.linspace(0.0, 1, width).cuda()
+    R2 = torch.linspace(0.0, 1, width).cuda()
     a = 2*R1 - 1
     b = 2*R2 - 1
-    radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32)
-    phi = torch.zeros((D.shape[1],width, width), dtype=torch.float32)
+    radius = torch.zeros((D.shape[1], width, width), dtype=torch.float32).cuda()
+    phi = torch.zeros((D.shape[1],width, width), dtype=torch.float32).cuda()
 
     
     B  = D.shape[1]
-    A, B_mesh = torch.meshgrid(a, b, indexing='ij')  # Shape: (H, H)
+    A, B_mesh = torch.meshgrid(a, b)  # Shape: (H, H)
 
     # Stack the meshgrid to handle the batch size in one step
     A_stack = A.unsqueeze(0).expand(B, -1, -1)  # Shape: (B, H, H)
     B_stack = B_mesh.unsqueeze(0).expand(B, -1, -1)  # Shape: (B, H, H)
 
     # Create meshgrid for r_[:, i] for each i in the batch without loop
-    A_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i], indexing='ij')[0] for i in range(B)])
-    B_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i], indexing='ij')[1] for i in range(B)])
+    A_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i])[0] for i in range(B)])
+    B_ = torch.stack([torch.meshgrid(r_[:, i], r_[:, i])[1] for i in range(B)])
 
     # Vectorized conditions across the batch
     condition1 = (A_stack == 0) & (B_stack == 0)
@@ -493,14 +492,14 @@ def concentric_dic_sampling_origin(subdiv, distortion_model, img_size, D=torch.t
     condition3 = ~condition1 & ~condition2
 
     # Initialize radius and phi tensors
-    radius = torch.zeros((B, width, width))
-    phi = torch.zeros((B, width, width))
+    radius = torch.zeros((B, width, width)).cuda()
+    phi = torch.zeros((B, width, width)).cuda()
 
     # Calculate radius and phi for all conditions in one go across the batch
-    radius = torch.where(condition1, torch.tensor(0.0), torch.where(condition2, A_, B_))
+    radius = torch.where(condition1, torch.tensor(0.0).cuda(), torch.where(condition2, A_, B_))
     phi = torch.where(
         condition1, 
-        torch.tensor(0.0), 
+        torch.tensor(0.0).cuda(), 
         torch.where(condition2, (np.pi / 4) * (B_stack / A_stack), np.pi / 2 - (np.pi / 4) * (A_stack / B_stack))
     )
 
@@ -543,12 +542,12 @@ def Eliptical_mapping(subdiv, distortion_model, img_size, D=torch.tensor(np.arra
     # import pdb;pdb.set_trace() 
     r = D_min[:, 1:]
     B, N = r.shape
-    size = 3 + (N - 1)*2
+    size = 2 + (N - 1)*2
     x = torch.zeros((B, size, size)).cuda()
     y = torch.zeros((B, size, size)).cuda()
     for i in range(N):
         # import pdb;pdb.set_trace()
-        step = 3 + i*2
+        step = 2 + i*2
         start = -r[:, i]
         end = r[:, i]
         base_linspace = torch.linspace(0, 1, step).unsqueeze(0).expand(B, -1).cuda()  # Shape: (B, steps)
@@ -587,58 +586,8 @@ def Eliptical_mapping(subdiv, distortion_model, img_size, D=torch.tensor(np.arra
     v = y * torch.sqrt(1 - (x**2 / 2))*max_radius
     return u, v, r
 
-def cubemap(image, n_rad, fov, xi, h, order):
 
 
-    # fov = 175
-    # xi = 0.2
-    # h = 128
-
-    img_size= h #64
-    bg= 0.3
-    f = compute_focal(np.deg2rad(fov), xi, h)
-
-
-    #here correct (not nan)
-    e = EnvironmentMap(image, format_='fisheye', dist=[f/(h/img_size),xi])
-    #breakpoint()
-    basedim= n_rad*h//2 #always make it the half of H
-    cube = e.copy().convertTo('cube',4*basedim, order=order)
-    #print(cube.data.shape)
-
-    all_cube= cube.data
-
-    all_cube[basedim//2:2*basedim+basedim//2, basedim//2 :2*basedim+basedim//2]=0 + bg
-    #test with removing the nan
-    all_cube[np.isnan(all_cube)]=0 + bg
-
-    #plt.imsave('cube.png', all_cube)
-
-    #print(np.where(np.isnan(all_cube)))
-
-    top = all_cube[0:basedim, basedim:2*basedim]
-    front = all_cube[basedim:2*basedim, basedim:2*basedim]
-    right= np.fliplr(np.flipud(all_cube[basedim:2*basedim, 2*basedim:3*basedim]))
-    back = all_cube[3*basedim:4*basedim, basedim:2*basedim] 
-    left= np.fliplr(np.flipud(all_cube[1*basedim:2*basedim, 0:basedim]))
-    bottom= all_cube[2*basedim:3*basedim, basedim:2*basedim]
-
-    cubemap= np.zeros((3*basedim,3*basedim,image.ndim))+bg
-    cubemap[0:basedim, basedim:2*basedim]= bottom
-    cubemap[basedim:2*basedim,0:basedim]= left
-    cubemap[basedim:2*basedim,basedim:2*basedim]= back
-    cubemap[basedim:2*basedim,2*basedim:3*basedim]= right
-    cubemap[2*basedim:3*basedim,basedim:2*basedim] = top
-    # print(cubemap.shape)
-    x,y= np.where(np.any(cubemap!=bg, axis=-1))
-    min_x, max_x, min_y, max_y = x.min(), x.max(), y.min(),y.max()
-    # print(min_x, min_y, max_x, max_y)
-    # plt.imsave(os.path.join(out_folder, 'before_cubemap_{}.png'.format(xi)), cubemap)
-
-    new_cubemap= cubemap[min_y:max_y+1,min_x:max_x+1]
-
-    return new_cubemap
-# print("after removing borders ", new_cubemap.shape)
 # def get_optimal_buffers(subdiv, n_radius, n_azimuth, img_size):
 #     """Get the optimal radius and azimuth buffers for a given subdivision
 
